@@ -36,7 +36,7 @@ const API_HOST     = 'eu.docusign.net';
 
 // ⚠️  Host the DOCX template somewhere publicly reachable and paste the URL here.
 //     Options: GitHub raw URL, Google Drive direct-download link, S3 public URL.
-const TEMPLATE_URL = 'YOUR_DOCX_TEMPLATE_URL_HERE';
+const TEMPLATE_URL = 'https://raw.githubusercontent.com/KevinWBSP/barespace-contracts/main/Barespace_Subscription_Contract_Template_v2_2.docx';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
