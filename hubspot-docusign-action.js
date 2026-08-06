@@ -32,7 +32,8 @@ const zlib   = require('zlib');
 
 const ACCOUNT_ID   = 'd9684d06-3d8e-447f-8097-0dcc4e9a3bf4';
 const API_HOST     = 'eu.docusign.net';
-const TEMPLATE_URL = 'https://raw.githubusercontent.com/KevinWBSP/barespace-contracts/main/Barespace_Subscription_Contract_Template_v2_2.docx';
+const TEMPLATE_URL = 'https://raw.githubusercontent.com/KevinWBSP/' +
+  'barespace-contracts/main/Barespace_Subscription_Contract_Template_v2_2.docx';
 
 // ─── CRC32 (required for ZIP) ─────────────────────────────────────────────────
 
@@ -312,6 +313,8 @@ function prefillDocx(buffer, values) {
 
 exports.main = async (event, callback) => {
   const p = event.inputFields;
+
+  console.log('Input fields received:', JSON.stringify(p));
 
   if (!p.signer_email) throw new Error('signer_email is empty — cannot create envelope');
   if (!p.dealname)     throw new Error('dealname is empty — cannot create envelope');
