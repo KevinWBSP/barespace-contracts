@@ -258,6 +258,11 @@ function prefillDocx(buffer, values) {
 
   let xml = docEntry.data.toString('utf8');
 
+  // Remove the sales_rep_name paragraph entirely if no value provided (avoids blank line)
+  if (!values.sales_rep_name) {
+    xml = xml.split('<w:p><w:pPr><w:spacing w:after="300"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Merriweather" w:cs="Merriweather" w:eastAsia="Merriweather" w:hAnsi="Merriweather"/><w:color w:val="555B63"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">[[sales_rep_name]]</w:t></w:r></w:p>').join('');
+  }
+
   // Remove add-on sections entirely when their clause block is not provided
   const addonSections = [
     {
@@ -310,11 +315,12 @@ function prefillDocx(buffer, values) {
 }
 
 async function getOwnerName(ownerId) {
-  if (!ownerId) return '';
+  if (!ownerId) { console.log('getOwnerName: no ownerId'); return ''; }
   const resp = await httpsRequest('GET', 'api.hubapi.com',
     '/crm/v3/owners/' + ownerId,
     { 'Authorization': 'Bearer ' + process.env.HUBSPOT_PRIVATE_APP_TOKEN }
   );
+  console.log('getOwnerName:', ownerId, 'status:', resp.status, 'body:', JSON.stringify(resp.body));
   if (resp.status === 200 && resp.body.firstName) {
     return (resp.body.firstName + ' ' + (resp.body.lastName || '')).trim();
   }
