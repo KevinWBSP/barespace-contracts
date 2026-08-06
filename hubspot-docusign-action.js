@@ -330,7 +330,7 @@ exports.main = async (event, callback) => {
   const missing = [];
   if (!p.dealname)                              missing.push('dealname');
   if (!p.signer_email)                          missing.push('signer_email');
-  if (!p.full_name)                             missing.push('full_name');
+  if (!p.full_name)                             console.log('Warning: full_name is empty');
   if (!p.pricing_tier)                          missing.push('pricing_tier');
   if (!p.contract_length)                       missing.push('contract_length');
   if (!p.payment_frequency)                     missing.push('payment_frequency');
