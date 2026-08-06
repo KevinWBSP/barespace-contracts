@@ -314,10 +314,20 @@ function prefillDocx(buffer, values) {
 exports.main = async (event, callback) => {
   const p = event.inputFields;
 
-  console.log('Input fields received:', JSON.stringify(p));
-
-  if (!p.signer_email) throw new Error('signer_email is empty — cannot create envelope');
-  if (!p.dealname)     throw new Error('dealname is empty — cannot create envelope');
+  // Validate required fields before doing any work
+  const missing = [];
+  if (!p.dealname)                              missing.push('dealname');
+  if (!p.signer_email)                          missing.push('signer_email');
+  if (!p.full_name)                             missing.push('full_name');
+  if (!p.pricing_tier)                          missing.push('pricing_tier');
+  if (!p.contract_length)                       missing.push('contract_length');
+  if (!p.payment_frequency)                     missing.push('payment_frequency');
+  if (!p.contract_monthly_subscription_display) missing.push('contract_monthly_subscription_display');
+  if (!p.contract_pricing_summary)              missing.push('contract_pricing_summary');
+  if (!p.contract_pricing_breakdown_table)      missing.push('contract_pricing_breakdown_table');
+  if (!p.contract_setup_fee_display)            missing.push('contract_setup_fee_display');
+  if (!p.contract_vat_rate_display)             missing.push('contract_vat_rate_display');
+  if (missing.length > 0) throw new Error('Missing required fields: ' + missing.join(', '));
 
   const today = new Date();
   const effectiveDate = today.getDate().toString().padStart(2, '0') + '/' +
@@ -343,7 +353,7 @@ exports.main = async (event, callback) => {
     contract_setup_total_due_display:      p.contract_setup_total_due_display,
     contract_bae_clause_block:             p.contract_bae_clause_block,
     contract_website_clause_block:         p.contract_website_clause_block,
-    contact_full_name:                     p.signer_full_name,
+    contact_full_name:                     p.full_name,
     sales_rep_name:                        p.sales_rep_name,
     contract_effective_date:               effectiveDate,
     signature_date:                        effectiveDate,
@@ -372,7 +382,7 @@ exports.main = async (event, callback) => {
       recipients: {
         signers: [{
           email:        p.signer_email,
-          name:         p.signer_full_name,
+          name:         p.full_name,
           recipientId:  '1',
           routingOrder: '1',
           tabs: {
