@@ -330,7 +330,7 @@ exports.main = async (event, callback) => {
   const missing = [];
   if (!p.dealname)                              missing.push('dealname');
   if (!p.signer_email)                          missing.push('signer_email');
-  if (!p.full_name)                             console.log('Warning: full_name is empty');
+  if (!p.firstname && !p.lastname)              missing.push('firstname / lastname');
   if (!p.pricing_tier)                          missing.push('pricing_tier');
   if (!p.contract_length)                       missing.push('contract_length');
   if (!p.payment_frequency)                     missing.push('payment_frequency');
@@ -365,7 +365,7 @@ exports.main = async (event, callback) => {
     contract_setup_total_due_display:      p.contract_setup_total_due_display,
     contract_bae_clause_block:             p.contract_bae_clause_block,
     contract_website_clause_block:         p.contract_website_clause_block,
-    contact_full_name:                     p.full_name,
+    contact_full_name:                     ((p.firstname || '') + ' ' + (p.lastname || '')).trim(),
     sales_rep_name:                        await getOwnerName(p.sales_rep_name),
     contract_effective_date:               effectiveDate,
     signature_date:                        effectiveDate,
@@ -394,7 +394,7 @@ exports.main = async (event, callback) => {
       recipients: {
         signers: [{
           email:        p.signer_email,
-          name:         p.full_name,
+          name:         ((p.firstname || '') + ' ' + (p.lastname || '')).trim(),
           recipientId:  '1',
           routingOrder: '1',
           tabs: {
