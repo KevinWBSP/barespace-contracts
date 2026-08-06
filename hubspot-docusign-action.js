@@ -1,8 +1,7 @@
 /**
  * HubSpot Custom Code Action — Create DocuSign Envelope (Pre-fill approach)
  *
- * DEPENDENCIES  →  set in the action's package.json:
- *   { "jszip": "3.10.1" }
+ * No external dependencies — uses only Node.js built-ins (https, crypto, zlib).
  *
  * SECRETS REQUIRED:
  *   DOCUSIGN_INTEGRATION_KEY
@@ -29,16 +28,148 @@
 
 const https  = require('https');
 const crypto = require('crypto');
-const JSZip  = require('jszip');
+const zlib   = require('zlib');
 
 const ACCOUNT_ID   = 'd9684d06-3d8e-447f-8097-0dcc4e9a3bf4';
 const API_HOST     = 'eu.docusign.net';
-
-// ⚠️  Host the DOCX template somewhere publicly reachable and paste the URL here.
-//     Options: GitHub raw URL, Google Drive direct-download link, S3 public URL.
 const TEMPLATE_URL = 'https://raw.githubusercontent.com/KevinWBSP/barespace-contracts/main/Barespace_Subscription_Contract_Template_v2_2.docx';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── CRC32 (required for ZIP) ─────────────────────────────────────────────────
+
+const CRC32_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let j = 0; j < 8; j++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[i] = c;
+  }
+  return t;
+})();
+
+function crc32(buf) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < buf.length; i++) {
+    c = (c >>> 8) ^ CRC32_TABLE[(c ^ buf[i]) & 0xFF];
+  }
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+// ─── ZIP reader ───────────────────────────────────────────────────────────────
+
+function readZip(buf) {
+  // Locate End of Central Directory record
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= 0; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd === -1) throw new Error('ZIP EOCD not found');
+
+  const numEntries = buf.readUInt16LE(eocd + 10);
+  const cdOffset   = buf.readUInt32LE(eocd + 16);
+
+  const entries = [];
+  let pos = cdOffset;
+
+  for (let i = 0; i < numEntries; i++) {
+    if (buf.readUInt32LE(pos) !== 0x02014b50) throw new Error('Bad CD signature at ' + pos);
+
+    const method         = buf.readUInt16LE(pos + 10);
+    const compressedSize = buf.readUInt32LE(pos + 20);
+    const uncompressedSize = buf.readUInt32LE(pos + 24);
+    const nameLen        = buf.readUInt16LE(pos + 28);
+    const extraLen       = buf.readUInt16LE(pos + 30);
+    const commentLen     = buf.readUInt16LE(pos + 32);
+    const localOffset    = buf.readUInt32LE(pos + 42);
+    const name           = buf.toString('utf8', pos + 46, pos + 46 + nameLen);
+
+    // Local header has its own extra field length — use it to find data start
+    const localNameLen  = buf.readUInt16LE(localOffset + 26);
+    const localExtraLen = buf.readUInt16LE(localOffset + 28);
+    const dataStart     = localOffset + 30 + localNameLen + localExtraLen;
+    const rawData       = buf.slice(dataStart, dataStart + compressedSize);
+
+    let data;
+    if      (method === 0) data = rawData;
+    else if (method === 8) data = zlib.inflateRawSync(rawData);
+    else throw new Error('Unsupported ZIP compression method: ' + method);
+
+    entries.push({ name, data });
+    pos += 46 + nameLen + extraLen + commentLen;
+  }
+
+  return entries;
+}
+
+// ─── ZIP writer ───────────────────────────────────────────────────────────────
+
+function buildZip(entries) {
+  const localParts = [];
+  const cdParts    = [];
+  let offset = 0;
+
+  for (const { name, data } of entries) {
+    const nameBuf    = Buffer.from(name, 'utf8');
+    const isDir      = name.endsWith('/');
+    const compressed = (isDir || data.length === 0) ? data : zlib.deflateRawSync(data, { level: 6 });
+    const method     = (isDir || data.length === 0) ? 0 : 8;
+    const checksum   = crc32(data);
+
+    // Local file header
+    const lh = Buffer.alloc(30 + nameBuf.length);
+    lh.writeUInt32LE(0x04034b50, 0);
+    lh.writeUInt16LE(20,              4);
+    lh.writeUInt16LE(0,               6);
+    lh.writeUInt16LE(method,          8);
+    lh.writeUInt16LE(0,              10); // mod time
+    lh.writeUInt16LE(0,              12); // mod date
+    lh.writeUInt32LE(checksum,       14);
+    lh.writeUInt32LE(compressed.length, 18);
+    lh.writeUInt32LE(data.length,    22);
+    lh.writeUInt16LE(nameBuf.length, 26);
+    lh.writeUInt16LE(0,              28); // extra len
+    nameBuf.copy(lh, 30);
+
+    // Central directory entry
+    const cd = Buffer.alloc(46 + nameBuf.length);
+    cd.writeUInt32LE(0x02014b50, 0);
+    cd.writeUInt16LE(20,              4);
+    cd.writeUInt16LE(20,              6);
+    cd.writeUInt16LE(0,               8);
+    cd.writeUInt16LE(method,         10);
+    cd.writeUInt16LE(0,              12); // mod time
+    cd.writeUInt16LE(0,              14); // mod date
+    cd.writeUInt32LE(checksum,       16);
+    cd.writeUInt32LE(compressed.length, 20);
+    cd.writeUInt32LE(data.length,    24);
+    cd.writeUInt16LE(nameBuf.length, 28);
+    cd.writeUInt16LE(0,              30); // extra len
+    cd.writeUInt16LE(0,              32); // comment len
+    cd.writeUInt16LE(0,              34); // disk start
+    cd.writeUInt16LE(0,              36); // internal attrs
+    cd.writeUInt32LE(0,              38); // external attrs
+    cd.writeUInt32LE(offset,         42); // local header offset
+    nameBuf.copy(cd, 46);
+
+    localParts.push(lh, compressed);
+    cdParts.push(cd);
+    offset += lh.length + compressed.length;
+  }
+
+  const cdBuf = Buffer.concat(cdParts);
+  const eocdBuf = Buffer.alloc(22);
+  eocdBuf.writeUInt32LE(0x06054b50, 0);
+  eocdBuf.writeUInt16LE(0,                0 + 4);
+  eocdBuf.writeUInt16LE(0,                0 + 6);
+  eocdBuf.writeUInt16LE(entries.length,   8);
+  eocdBuf.writeUInt16LE(entries.length,  10);
+  eocdBuf.writeUInt32LE(cdBuf.length,    12);
+  eocdBuf.writeUInt32LE(offset,          16);
+  eocdBuf.writeUInt16LE(0,              20);
+
+  return Buffer.concat([...localParts, cdBuf, eocdBuf]);
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function httpsRequest(method, hostname, path, headers, body) {
   return new Promise((resolve, reject) => {
@@ -62,7 +193,6 @@ function httpsRequest(method, hostname, path, headers, body) {
 function fetchBuffer(url) {
   return new Promise((resolve, reject) => {
     https.get(url, res => {
-      // Follow redirects (Google Drive, GitHub, etc.)
       if (res.statusCode === 301 || res.statusCode === 302) {
         return fetchBuffer(res.headers.location).then(resolve).catch(reject);
       }
@@ -118,9 +248,14 @@ function toXmlText(str) {
     .join('</w:t><w:br/><w:t xml:space="preserve">');
 }
 
-async function prefillDocx(buffer, values) {
-  const zip = await JSZip.loadAsync(buffer);
-  let xml   = await zip.file('word/document.xml').async('string');
+// ─── DOCX pre-fill ────────────────────────────────────────────────────────────
+
+function prefillDocx(buffer, values) {
+  const entries  = readZip(buffer);
+  const docEntry = entries.find(e => e.name === 'word/document.xml');
+  if (!docEntry) throw new Error('word/document.xml not found in DOCX');
+
+  let xml = docEntry.data.toString('utf8');
 
   // Remove add-on sections entirely when their clause block is not provided
   const addonSections = [
@@ -136,9 +271,7 @@ async function prefillDocx(buffer, values) {
     },
   ];
   for (const { key, heading, clause } of addonSections) {
-    if (!values[key]) {
-      xml = xml.split(heading + clause).join('');
-    }
+    if (!values[key]) xml = xml.split(heading + clause).join('');
   }
 
   // Replace [[field_name]] placeholders
@@ -171,8 +304,8 @@ async function prefillDocx(buffer, values) {
     '<w:p><w:pPr><w:pageBreakBefore/><w:pBdr><w:bottom w:val="single" w:color="B2EDD8" w:sz="8"/></w:pBdr><w:spacing w:after="180" w:before="260"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Special Gothic Expanded" w:cs="Special Gothic Expanded" w:eastAsia="Special Gothic Expanded" w:hAnsi="Special Gothic Expanded"/><w:b/><w:bCs/><w:color w:val="07756C"/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr><w:t xml:space="preserve">Plan &amp; Pricing</w:t></w:r></w:p>'
   );
 
-  zip.file('word/document.xml', xml);
-  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  docEntry.data = Buffer.from(xml, 'utf8');
+  return buildZip(entries);
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
@@ -218,7 +351,7 @@ exports.main = async (event, callback) => {
   console.log('Template size:', templateBuffer.length, 'bytes');
 
   console.log('Pre-filling document...');
-  const filledBuffer = await prefillDocx(templateBuffer, values);
+  const filledBuffer = prefillDocx(templateBuffer, values);
   const docBase64    = filledBuffer.toString('base64');
   console.log('Filled doc size:', (docBase64.length / 1024).toFixed(0), 'KB (base64)');
 
@@ -267,10 +400,8 @@ exports.main = async (event, callback) => {
   const envelopeId = envResp.body.envelopeId;
   console.log('Envelope sent:', envelopeId);
 
-  const docusignUrl = 'https://apps.docusign.com/send/documents/details/' + envelopeId;
-
   callback({ outputFields: {
     docusign_envelope_id:  envelopeId,
-    contract_docusign_url: docusignUrl,
+    contract_docusign_url: 'https://apps.docusign.com/send/documents/details/' + envelopeId,
   }});
 };
