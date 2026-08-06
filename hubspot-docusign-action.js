@@ -309,6 +309,18 @@ function prefillDocx(buffer, values) {
   return buildZip(entries);
 }
 
+async function getOwnerName(ownerId) {
+  if (!ownerId) return '';
+  const resp = await httpsRequest('GET', 'api.hubapi.com',
+    '/crm/v3/owners/' + ownerId,
+    { 'Authorization': 'Bearer ' + process.env.HUBSPOT_PRIVATE_APP_TOKEN }
+  );
+  if (resp.status === 200 && resp.body.firstName) {
+    return (resp.body.firstName + ' ' + (resp.body.lastName || '')).trim();
+  }
+  return '';
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 exports.main = async (event, callback) => {
@@ -354,7 +366,7 @@ exports.main = async (event, callback) => {
     contract_bae_clause_block:             p.contract_bae_clause_block,
     contract_website_clause_block:         p.contract_website_clause_block,
     contact_full_name:                     p.full_name,
-    sales_rep_name:                        p.sales_rep_name,
+    sales_rep_name:                        await getOwnerName(p.sales_rep_name),
     contract_effective_date:               effectiveDate,
     signature_date:                        effectiveDate,
   };
