@@ -3,12 +3,16 @@
  *
  * Deploy as a Web App (Execute as: Me, Access: Anyone).
  * Tracking link format:
- *   https://script.google.com/.../exec?docId=YOUR_DOC_ID
+ *   https://script.google.com/.../exec?docId=YOUR_DOC_ID&dealId=YOUR_DEAL_ID
+ *
+ * SCRIPT PROPERTIES (Project Settings → Script Properties):
+ *   HUBSPOT_PRIVATE_APP_TOKEN  ← HubSpot private app token
  *
  * Flow:
  *   1. Client opens tracking link → email to NOTIFY_EMAIL + landing page
  *   2. Client clicks "Sign Contract" → signing form
- *   3. Client submits → email to NOTIFY_EMAIL with signed PDF attached
+ *   3. Client submits → PDF emailed to NOTIFY_EMAIL + attached as note
+ *      on HubSpot Deal, Contact, and Company
  */
 
 var NOTIFY_EMAIL = 'kevin@barespace.io';
@@ -16,14 +20,15 @@ var NOTIFY_EMAIL = 'kevin@barespace.io';
 // ─── Routing ──────────────────────────────────────────────────────────────────
 
 function doGet(e) {
-  var p     = e.parameter || {};
-  var docId = p.docId || '';
+  var p      = e.parameter || {};
+  var docId  = p.docId  || '';
+  var dealId = p.dealId || '';
   var docUrl = docId
     ? 'https://docs.google.com/document/d/' + docId + '/preview'
     : 'https://docs.google.com';
 
   if (p.action === 'sign') {
-    return HtmlService.createHtmlOutput(buildSigningPage(docId, docUrl))
+    return HtmlService.createHtmlOutput(buildSigningPage(docId, dealId, docUrl))
       .setTitle('Sign Your Barespace Contract')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
@@ -35,7 +40,7 @@ function doGet(e) {
     'Your Barespace contract was just opened.\n\nDocument: ' + docUrl
   );
 
-  return HtmlService.createHtmlOutput(buildLandingPage(docId, docUrl))
+  return HtmlService.createHtmlOutput(buildLandingPage(docId, dealId, docUrl))
     .setTitle('Barespace Contract')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
@@ -44,29 +49,114 @@ function doGet(e) {
 
 function submitSignature(data) {
   var docId     = data.docId;
+  var dealId    = data.dealId;
   var typedName = data.typedName;
   var docUrl    = 'https://docs.google.com/document/d/' + docId + '/preview';
+  var signedAt  = new Date().toLocaleString('en-IE', { timeZone: 'Europe/Dublin' });
 
   // Export Google Doc as PDF
   var pdfBlob = DriveApp.getFileById(docId).getAs('application/pdf');
   pdfBlob.setName('Barespace_Contract_Signed.pdf');
 
-  // Email with PDF attached
+  // Email notification with PDF attached
   GmailApp.sendEmail(
     NOTIFY_EMAIL,
     'Contract Signed',
-    'The Barespace contract has been signed.\n\nSigned by: ' + typedName + '\nSigned at: ' + new Date().toLocaleString('en-IE', { timeZone: 'Europe/Dublin' }) + '\n\nDocument: ' + docUrl,
+    'The Barespace contract has been signed.\n\n' +
+    'Signed by: ' + typedName + '\n' +
+    'Signed at: ' + signedAt + '\n\n' +
+    'Document: ' + docUrl,
     { attachments: [pdfBlob] }
   );
+
+  // Attach to HubSpot if a Deal ID was provided
+  if (dealId) {
+    attachToHubspot(pdfBlob, dealId, typedName, signedAt);
+  }
 
   return { success: true };
 }
 
+// ─── HubSpot attachment ───────────────────────────────────────────────────────
+
+function attachToHubspot(pdfBlob, dealId, typedName, signedAt) {
+  var token = PropertiesService.getScriptProperties().getProperty('HUBSPOT_PRIVATE_APP_TOKEN');
+  if (!token) throw new Error('HUBSPOT_PRIVATE_APP_TOKEN not set in Script Properties');
+
+  var headers = { 'Authorization': 'Bearer ' + token };
+
+  // Get associated contacts and companies from the deal
+  var contactIds = getAssociatedIds(dealId, 'contacts', token);
+  var companyIds = getAssociatedIds(dealId, 'companies', token);
+  Logger.log('Deal: ' + dealId + ' | Contacts: ' + contactIds + ' | Companies: ' + companyIds);
+
+  // Upload PDF to HubSpot Files API
+  var uploadResp = UrlFetchApp.fetch('https://api.hubapi.com/files/v3/files', {
+    method:  'post',
+    headers: headers,
+    payload: {
+      file:       pdfBlob,
+      folderPath: '/contracts',
+      options:    JSON.stringify({ access: 'PRIVATE', overwrite: false }),
+    },
+    muteHttpExceptions: true,
+  });
+
+  var fileData   = JSON.parse(uploadResp.getContentText());
+  Logger.log('HubSpot file upload response: ' + JSON.stringify(fileData));
+
+  var hubFileId  = fileData.id  || null;
+  var hubFileUrl = fileData.url || null;
+
+  // Build note body
+  var noteBody =
+    '<p><strong>Signed Barespace Contract</strong></p>' +
+    '<p>Signed by: ' + typedName + '<br>Signed at: ' + signedAt + '</p>' +
+    (hubFileUrl ? '<p><a href="' + hubFileUrl + '">Download Signed PDF</a></p>' : '');
+
+  // Create one engagement note associated with deal + all contacts + all companies
+  var associations = {
+    dealIds:    [parseInt(dealId)],
+    contactIds: contactIds.map(Number),
+    companyIds: companyIds.map(Number),
+  };
+
+  var engagementPayload = {
+    engagement:   { active: true, type: 'NOTE', timestamp: Date.now() },
+    associations: associations,
+    attachments:  hubFileId ? [{ id: hubFileId }] : [],
+    metadata:     { body: noteBody },
+  };
+
+  var noteResp = UrlFetchApp.fetch('https://api.hubapi.com/engagements/v1/engagements', {
+    method:  'post',
+    headers: Object.assign({}, headers, { 'Content-Type': 'application/json' }),
+    payload: JSON.stringify(engagementPayload),
+    muteHttpExceptions: true,
+  });
+
+  Logger.log('HubSpot engagement response (' + noteResp.getResponseCode() + '): ' + noteResp.getContentText());
+}
+
+function getAssociatedIds(dealId, objectType, token) {
+  try {
+    var resp = UrlFetchApp.fetch(
+      'https://api.hubapi.com/crm/v4/objects/deals/' + dealId + '/associations/' + objectType,
+      { headers: { 'Authorization': 'Bearer ' + token }, muteHttpExceptions: true }
+    );
+    var data = JSON.parse(resp.getContentText());
+    return (data.results || []).map(function(r) { return r.toObjectId; });
+  } catch (e) {
+    Logger.log('Failed to get ' + objectType + ': ' + e);
+    return [];
+  }
+}
+
 // ─── HTML: Landing page ───────────────────────────────────────────────────────
 
-function buildLandingPage(docId, docUrl) {
-  var baseUrl  = ScriptApp.getService().getUrl();
-  var signUrl  = baseUrl + '?action=sign&docId=' + encodeURIComponent(docId);
+function buildLandingPage(docId, dealId, docUrl) {
+  var baseUrl = ScriptApp.getService().getUrl();
+  var signUrl = baseUrl + '?action=sign&docId=' + encodeURIComponent(docId) + '&dealId=' + encodeURIComponent(dealId);
 
   return '<!DOCTYPE html><html><head>' +
     '<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
@@ -91,7 +181,7 @@ function buildLandingPage(docId, docUrl) {
 
 // ─── HTML: Signing page ───────────────────────────────────────────────────────
 
-function buildSigningPage(docId, docUrl) {
+function buildSigningPage(docId, dealId, docUrl) {
   return '<!DOCTYPE html><html><head>' +
     '<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<style>' +
@@ -143,11 +233,11 @@ function buildSigningPage(docId, docUrl) {
             'document.getElementById("form-section").style.display="none";' +
             'document.getElementById("success-section").style.display="block";' +
           '})' +
-          '.withFailureHandler(function(){' +
+          '.withFailureHandler(function(err){' +
             'btn.disabled=false;btn.textContent="Sign Contract";' +
-            'alert("Something went wrong. Please try again.");' +
+            'alert("Something went wrong: "+(err.message||err));' +
           '})' +
-          '.submitSignature({typedName:nameInput.value.trim(),docId:"' + docId + '"});' +
+          '.submitSignature({typedName:nameInput.value.trim(),docId:"' + docId + '",dealId:"' + dealId + '"});' +
       '}' +
     '</script>' +
     '</body></html>';
