@@ -79,11 +79,19 @@ function submitSignature(data) {
 
 // ─── HubSpot attachment ───────────────────────────────────────────────────────
 
+// HubSpot CRM Notes v3 association type IDs
+var HS_ASSOC = {
+  NOTE_TO_CONTACT: 202,
+  NOTE_TO_COMPANY: 190,
+  NOTE_TO_DEAL:    214,
+};
+
 function attachToHubspot(pdfBlob, dealId, typedName, signedAt) {
   var token = PropertiesService.getScriptProperties().getProperty('HUBSPOT_PRIVATE_APP_TOKEN');
   if (!token) throw new Error('HUBSPOT_PRIVATE_APP_TOKEN not set in Script Properties');
 
-  var headers = { 'Authorization': 'Bearer ' + token };
+  var headers    = { 'Authorization': 'Bearer ' + token };
+  var jsonHeaders = Object.assign({}, headers, { 'Content-Type': 'application/json' });
 
   // Get associated contacts and companies from the deal
   var contactIds = getAssociatedIds(dealId, 'contacts', token);
@@ -102,40 +110,53 @@ function attachToHubspot(pdfBlob, dealId, typedName, signedAt) {
     muteHttpExceptions: true,
   });
 
-  var fileData   = JSON.parse(uploadResp.getContentText());
+  var fileData  = JSON.parse(uploadResp.getContentText());
   Logger.log('HubSpot file upload response: ' + JSON.stringify(fileData));
 
-  var hubFileId  = fileData.id  || null;
-  var hubFileUrl = fileData.url || null;
+  if (!fileData.id) throw new Error('File upload failed: ' + JSON.stringify(fileData));
 
-  // Build note body
-  var noteBody =
-    '<p><strong>Signed Barespace Contract</strong></p>' +
-    '<p>Signed by: ' + typedName + '<br>Signed at: ' + signedAt + '</p>' +
-    (hubFileUrl ? '<p><a href="' + hubFileUrl + '">Download Signed PDF</a></p>' : '');
+  var hubFileId = fileData.id;
 
-  // Create one engagement note associated with deal + all contacts + all companies
-  var associations = {
-    dealIds:    [parseInt(dealId)],
-    contactIds: contactIds.map(Number),
-    companyIds: companyIds.map(Number),
-  };
+  // Build associations array for the note — deal + all contacts + all companies
+  var associations = [];
 
-  var engagementPayload = {
-    engagement:   { active: true, type: 'NOTE', timestamp: Date.now() },
+  associations.push({
+    to:    { id: dealId },
+    types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: HS_ASSOC.NOTE_TO_DEAL }],
+  });
+
+  contactIds.forEach(function(id) {
+    associations.push({
+      to:    { id: id },
+      types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: HS_ASSOC.NOTE_TO_CONTACT }],
+    });
+  });
+
+  companyIds.forEach(function(id) {
+    associations.push({
+      to:    { id: id },
+      types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: HS_ASSOC.NOTE_TO_COMPANY }],
+    });
+  });
+
+  // Create note with hs_attachment_ids — appears in the Attachments section of each record
+  var notePayload = {
+    properties: {
+      hs_note_body:       'Signed Barespace Contract — ' + typedName + ' — ' + signedAt,
+      hs_timestamp:       new Date().toISOString(),
+      hs_attachment_ids:  String(hubFileId),
+    },
     associations: associations,
-    attachments:  hubFileId ? [{ id: hubFileId }] : [],
-    metadata:     { body: noteBody },
   };
 
-  var noteResp = UrlFetchApp.fetch('https://api.hubapi.com/engagements/v1/engagements', {
-    method:  'post',
-    headers: Object.assign({}, headers, { 'Content-Type': 'application/json' }),
-    payload: JSON.stringify(engagementPayload),
+  var noteResp = UrlFetchApp.fetch('https://api.hubapi.com/crm/v3/objects/notes', {
+    method:             'post',
+    headers:            jsonHeaders,
+    payload:            JSON.stringify(notePayload),
     muteHttpExceptions: true,
   });
 
-  Logger.log('HubSpot engagement response (' + noteResp.getResponseCode() + '): ' + noteResp.getContentText());
+  Logger.log('HubSpot note response (' + noteResp.getResponseCode() + '): ' + noteResp.getContentText());
 }
 
 function getAssociatedIds(dealId, objectType, token) {
