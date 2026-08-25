@@ -48,13 +48,15 @@ function doGet(e) {
 // ─── Called from signing page via google.script.run ──────────────────────────
 
 function submitSignature(data) {
-  var docId     = data.docId;
-  var dealId    = data.dealId;
-  var typedName = data.typedName;
-  var docUrl    = 'https://docs.google.com/document/d/' + docId + '/preview';
-  var signedAt  = new Date().toLocaleString('en-IE', { timeZone: 'Europe/Dublin' });
+  var docId            = data.docId;
+  var dealId           = data.dealId;
+  var printedName      = data.printedName;
+  var signatureDataUrl = data.signatureDataUrl;
+  var docUrl           = 'https://docs.google.com/document/d/' + docId + '/preview';
+  var signedAt         = new Date().toLocaleString('en-IE', { timeZone: 'Europe/Dublin' });
 
-  // Export Google Doc as PDF
+  // Insert drawn signature into the Google Doc then export as PDF
+  insertSignatureIntoDoc(docId, signatureDataUrl, printedName, signedAt);
   var pdfBlob = DriveApp.getFileById(docId).getAs('application/pdf');
   pdfBlob.setName('Barespace_Contract_Signed.pdf');
 
@@ -63,7 +65,7 @@ function submitSignature(data) {
     NOTIFY_EMAIL,
     'Contract Signed',
     'The Barespace contract has been signed.\n\n' +
-    'Signed by: ' + typedName + '\n' +
+    'Signed by: ' + printedName + '\n' +
     'Signed at: ' + signedAt + '\n\n' +
     'Document: ' + docUrl,
     { attachments: [pdfBlob] }
@@ -71,10 +73,39 @@ function submitSignature(data) {
 
   // Attach to HubSpot if a Deal ID was provided
   if (dealId) {
-    attachToHubspot(pdfBlob, dealId, typedName, signedAt);
+    attachToHubspot(pdfBlob, dealId, printedName, signedAt);
   }
 
   return { success: true };
+}
+
+// Appends a signature certificate page to the Google Doc before PDF export
+function insertSignatureIntoDoc(docId, signatureDataUrl, printedName, signedAt) {
+  var doc  = DocumentApp.openById(docId);
+  var body = doc.getBody();
+
+  // Decode the base64 PNG captured from the signing canvas
+  var base64  = signatureDataUrl.replace('data:image/png;base64,', '');
+  var sigBlob = Utilities.newBlob(Utilities.base64Decode(base64), 'image/png', 'signature.png');
+
+  // Append a page break then a signature certificate
+  body.appendPageBreak();
+
+  var heading = body.appendParagraph('Digital Signature Certificate');
+  heading.setHeading(DocumentApp.ParagraphHeading.HEADING2);
+
+  body.appendParagraph('This document was electronically signed under the following conditions:');
+  body.appendParagraph('');
+  body.appendParagraph('Printed name:  ' + printedName);
+  body.appendParagraph('Signed at:         ' + signedAt);
+  body.appendParagraph('');
+  body.appendParagraph('Signature:');
+
+  var sigImage = body.appendImage(sigBlob);
+  sigImage.setWidth(240);
+  sigImage.setHeight(90);
+
+  doc.saveAndClose();
 }
 
 // ─── HubSpot attachment ───────────────────────────────────────────────────────
@@ -214,6 +245,11 @@ function buildSigningPage(docId, dealId, docUrl) {
       'label{display:block;font-size:13px;font-weight:600;color:#333;margin-bottom:6px}' +
       'input[type=text]{width:100%;padding:12px;border:1.5px solid #ddd;border-radius:8px;font-size:16px;box-sizing:border-box;margin-bottom:20px}' +
       'input[type=text]:focus{outline:none;border-color:#07756C}' +
+      '.sig-wrap{position:relative;margin-bottom:8px}' +
+      '#sigCanvas{width:100%;height:150px;border:1.5px solid #ddd;border-radius:8px;cursor:crosshair;touch-action:none;background:#fafafa;display:block}' +
+      '#sigCanvas.signed{border-color:#07756C}' +
+      '.sig-hint{font-size:12px;color:#aaa;margin-bottom:4px}' +
+      '.clear-btn{background:none;border:none;color:#07756C;font-size:13px;cursor:pointer;padding:0;margin-bottom:20px;text-decoration:underline}' +
       '.agree{display:flex;gap:12px;align-items:flex-start;margin-bottom:28px}' +
       '.agree input{margin-top:3px;flex-shrink:0}' +
       '.agree span{font-size:14px;color:#555;line-height:1.6}' +
@@ -226,9 +262,15 @@ function buildSigningPage(docId, dealId, docUrl) {
       '<div class="logo">BARESPACE</div>' +
       '<div id="form-section">' +
         '<h1>Sign Your Contract</h1>' +
-        '<p>By typing your full name and checking the box below you are electronically signing and agreeing to the terms of your Barespace Subscription Agreement.</p>' +
-        '<label for="typedName">Full Name</label>' +
-        '<input type="text" id="typedName" placeholder="Your full name" autocomplete="name">' +
+        '<p>Print your name, draw your signature in the box, then check the agreement box below.</p>' +
+        '<label for="printedName">Print Full Name</label>' +
+        '<input type="text" id="printedName" placeholder="Your full name" autocomplete="name">' +
+        '<label>Signature</label>' +
+        '<p class="sig-hint">Draw your signature below using your mouse or finger</p>' +
+        '<div class="sig-wrap">' +
+          '<canvas id="sigCanvas"></canvas>' +
+        '</div>' +
+        '<button class="clear-btn" onclick="clearSig()">Clear signature</button>' +
         '<div class="agree">' +
           '<input type="checkbox" id="agree">' +
           '<span>I have read and agree to the terms of the Barespace Subscription Agreement.</span>' +
@@ -241,14 +283,47 @@ function buildSigningPage(docId, dealId, docUrl) {
       '</div>' +
     '</div>' +
     '<script>' +
+      // Canvas setup
+      'var canvas=document.getElementById("sigCanvas");' +
+      'var ctx=canvas.getContext("2d");' +
+      'var drawing=false,hasSigned=false;' +
+      // Scale canvas to actual pixel size
+      'function resizeCanvas(){' +
+        'var rect=canvas.getBoundingClientRect();' +
+        'canvas.width=rect.width*window.devicePixelRatio;' +
+        'canvas.height=rect.height*window.devicePixelRatio;' +
+        'ctx.scale(window.devicePixelRatio,window.devicePixelRatio);' +
+        'ctx.strokeStyle="#111";ctx.lineWidth=2;ctx.lineCap="round";ctx.lineJoin="round";' +
+      '}' +
+      'resizeCanvas();' +
+      // Coordinate helpers
+      'function getPos(e){' +
+        'var r=canvas.getBoundingClientRect();' +
+        'var src=e.touches?e.touches[0]:e;' +
+        'return{x:src.clientX-r.left,y:src.clientY-r.top};' +
+      '}' +
+      // Mouse events
+      'canvas.addEventListener("mousedown",function(e){drawing=true;var p=getPos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);});' +
+      'canvas.addEventListener("mousemove",function(e){if(!drawing)return;var p=getPos(e);ctx.lineTo(p.x,p.y);ctx.stroke();markSigned();});' +
+      'canvas.addEventListener("mouseup",function(){drawing=false;});' +
+      'canvas.addEventListener("mouseleave",function(){drawing=false;});' +
+      // Touch events
+      'canvas.addEventListener("touchstart",function(e){e.preventDefault();drawing=true;var p=getPos(e);ctx.beginPath();ctx.moveTo(p.x,p.y);},{passive:false});' +
+      'canvas.addEventListener("touchmove",function(e){e.preventDefault();if(!drawing)return;var p=getPos(e);ctx.lineTo(p.x,p.y);ctx.stroke();markSigned();},{passive:false});' +
+      'canvas.addEventListener("touchend",function(){drawing=false;});' +
+      'function markSigned(){if(!hasSigned){hasSigned=true;canvas.classList.add("signed");}checkReady();}' +
+      'function clearSig(){ctx.clearRect(0,0,canvas.width,canvas.height);hasSigned=false;canvas.classList.remove("signed");checkReady();}' +
+      // Form validation
       'var agree=document.getElementById("agree");' +
-      'var nameInput=document.getElementById("typedName");' +
+      'var nameInput=document.getElementById("printedName");' +
       'var btn=document.getElementById("submitBtn");' +
-      'function checkReady(){btn.disabled=!(agree.checked&&nameInput.value.trim().length>1);}' +
+      'function checkReady(){btn.disabled=!(agree.checked&&nameInput.value.trim().length>1&&hasSigned);}' +
       'agree.addEventListener("change",checkReady);' +
       'nameInput.addEventListener("input",checkReady);' +
+      // Submit
       'function submit_(){' +
         'btn.disabled=true;btn.textContent="Submitting\u2026";' +
+        'var sigDataUrl=canvas.toDataURL("image/png");' +
         'google.script.run' +
           '.withSuccessHandler(function(){' +
             'document.getElementById("form-section").style.display="none";' +
@@ -258,7 +333,7 @@ function buildSigningPage(docId, dealId, docUrl) {
             'btn.disabled=false;btn.textContent="Sign Contract";' +
             'alert("Something went wrong: "+(err.message||err));' +
           '})' +
-          '.submitSignature({typedName:nameInput.value.trim(),docId:"' + docId + '",dealId:"' + dealId + '"});' +
+          '.submitSignature({printedName:nameInput.value.trim(),signatureDataUrl:sigDataUrl,docId:"' + docId + '",dealId:"' + dealId + '"});' +
       '}' +
     '</script>' +
     '</body></html>';
