@@ -327,3 +327,8 @@ function buildContractPage(docId, dealId) {
     '</script>' +
     '</body></html>';
 }
+
+// Run this once to grant Google Docs permission, then delete it
+function authoriseDocuments() {
+  DocumentApp.openById('dummy');
+}
