@@ -20,7 +20,7 @@
  *   contract_vat_rate_display,
  *   contract_concierge_description,
  *   contract_bae_clause_block, contract_website_clause_block,
- *   contract_ai_terms_block, contract_early_termination_block
+ *   contract_ai_terms_block, contract_early_termination
  *
  * OUTPUT PROPERTIES:
  *   docusign_envelope_id
@@ -280,9 +280,9 @@ function prefillDocx(buffer, values) {
       clause:  '<w:p><w:pPr><w:pBdr><w:top w:val="single" w:color="B2EDD8" w:sz="4"/><w:bottom w:val="single" w:color="B2EDD8" w:sz="4"/><w:left w:val="single" w:color="B2EDD8" w:sz="4"/><w:right w:val="single" w:color="B2EDD8" w:sz="4"/></w:pBdr><w:shd w:fill="FFF0FF" w:val="clear"/><w:spacing w:after="300"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Merriweather" w:cs="Merriweather" w:eastAsia="Merriweather" w:hAnsi="Merriweather"/><w:i/><w:iCs/><w:color w:val="555B63"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t xml:space="preserve">[[contract_ai_terms_block]]</w:t></w:r></w:p>',
     },
     {
-      key:     'contract_early_termination_block',
+      key:     'contract_early_termination',
       heading: '<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:color="B2EDD8" w:sz="8"/></w:pBdr><w:spacing w:after="180" w:before="260"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Special Gothic Expanded" w:cs="Special Gothic Expanded" w:eastAsia="Special Gothic Expanded" w:hAnsi="Special Gothic Expanded"/><w:b/><w:bCs/><w:color w:val="07756C"/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr><w:t xml:space="preserve">Early Termination</w:t></w:r></w:p>',
-      clause:  '<w:p><w:pPr><w:pBdr><w:top w:val="single" w:color="B2EDD8" w:sz="4"/><w:bottom w:val="single" w:color="B2EDD8" w:sz="4"/><w:left w:val="single" w:color="B2EDD8" w:sz="4"/><w:right w:val="single" w:color="B2EDD8" w:sz="4"/></w:pBdr><w:shd w:fill="FFF0FF" w:val="clear"/><w:spacing w:after="300"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Merriweather" w:cs="Merriweather" w:eastAsia="Merriweather" w:hAnsi="Merriweather"/><w:i/><w:iCs/><w:color w:val="555B63"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t xml:space="preserve">[[contract_early_termination_block]]</w:t></w:r></w:p>',
+      clause:  '<w:p><w:pPr><w:pBdr><w:top w:val="single" w:color="B2EDD8" w:sz="4"/><w:bottom w:val="single" w:color="B2EDD8" w:sz="4"/><w:left w:val="single" w:color="B2EDD8" w:sz="4"/><w:right w:val="single" w:color="B2EDD8" w:sz="4"/></w:pBdr><w:shd w:fill="FFF0FF" w:val="clear"/><w:spacing w:after="300"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Merriweather" w:cs="Merriweather" w:eastAsia="Merriweather" w:hAnsi="Merriweather"/><w:i/><w:iCs/><w:color w:val="555B63"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t xml:space="preserve">[[contract_early_termination]]</w:t></w:r></w:p>',
     },
   ];
   for (const { key, heading, clause } of addonSections) {
@@ -370,7 +370,7 @@ exports.main = async (event, callback) => {
     contract_bae_clause_block:             p.contract_bae_clause_block,
     contract_website_clause_block:         p.contract_website_clause_block,
     contract_ai_terms_block:               p.contract_ai_terms_block,
-    contract_early_termination_block:      p.contract_early_termination_block,
+    contract_early_termination:      p.contract_early_termination,
     contact_full_name:                     ((p.firstname || '') + ' ' + (p.lastname || '')).trim(),
     sales_rep_name:                        await getOwnerName(p.sales_rep_name),
     contract_effective_date:               effectiveDate,
