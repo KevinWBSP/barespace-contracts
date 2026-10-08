@@ -6,8 +6,8 @@
  * SECRETS REQUIRED:
  *   DOCUSIGN_INTEGRATION_KEY
  *   DOCUSIGN_USER_ID
- *   DOCUSIGN_RSA_PRIVATE_KEY_PART1   ← first half of key body (no header/footer lines)
- *   DOCUSIGN_RSA_PRIVATE_KEY_PART2   ← second half of key body (no header/footer lines)
+ *   DOCUSIGN_RSA_PRIVATE_KEY_PART1   <- first half of key body (no header/footer lines)
+ *   DOCUSIGN_RSA_PRIVATE_KEY_PART2   <- second half of key body (no header/footer lines)
  *
  * INPUT PROPERTIES:
  *   dealname, signer_email, signer_full_name, sales_rep_name,
@@ -17,9 +17,10 @@
  *   contract_pricing_summary, contract_pricing_breakdown_table,
  *   contract_card_rate_disclosure,
  *   contract_manual_email_rate, contract_manual_sms_rate,
- *   contract_setup_fee_display, contract_setup_discount_display,
- *   contract_vat_rate_display, contract_setup_total_due_display,
- *   contract_bae_clause_block, contract_website_clause_block
+ *   contract_vat_rate_display,
+ *   contract_concierge_description,
+ *   contract_bae_clause_block, contract_website_clause_block,
+ *   contract_ai_terms_block
  *
  * OUTPUT PROPERTIES:
  *   docusign_envelope_id
@@ -33,9 +34,9 @@ const zlib   = require('zlib');
 const ACCOUNT_ID   = 'd9684d06-3d8e-447f-8097-0dcc4e9a3bf4';
 const API_HOST     = 'eu.docusign.net';
 const TEMPLATE_URL = 'https://raw.githubusercontent.com/KevinWBSP/' +
-  'barespace-contracts/main/Barespace_Subscription_Contract_Template_v2_2.docx';
+  'barespace-contracts/main/Barespace_Subscription_Contract_Template_v2_3.docx';
 
-// ─── CRC32 (required for ZIP) ─────────────────────────────────────────────────
+// --- CRC32 (required for ZIP) -------------------------------------------------
 
 const CRC32_TABLE = (() => {
   const t = new Uint32Array(256);
@@ -55,10 +56,9 @@ function crc32(buf) {
   return (c ^ 0xFFFFFFFF) >>> 0;
 }
 
-// ─── ZIP reader ───────────────────────────────────────────────────────────────
+// --- ZIP reader ---------------------------------------------------------------
 
 function readZip(buf) {
-  // Locate End of Central Directory record
   let eocd = -1;
   for (let i = buf.length - 22; i >= 0; i--) {
     if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
@@ -74,16 +74,15 @@ function readZip(buf) {
   for (let i = 0; i < numEntries; i++) {
     if (buf.readUInt32LE(pos) !== 0x02014b50) throw new Error('Bad CD signature at ' + pos);
 
-    const method         = buf.readUInt16LE(pos + 10);
-    const compressedSize = buf.readUInt32LE(pos + 20);
+    const method           = buf.readUInt16LE(pos + 10);
+    const compressedSize   = buf.readUInt32LE(pos + 20);
     const uncompressedSize = buf.readUInt32LE(pos + 24);
-    const nameLen        = buf.readUInt16LE(pos + 28);
-    const extraLen       = buf.readUInt16LE(pos + 30);
-    const commentLen     = buf.readUInt16LE(pos + 32);
-    const localOffset    = buf.readUInt32LE(pos + 42);
-    const name           = buf.toString('utf8', pos + 46, pos + 46 + nameLen);
+    const nameLen          = buf.readUInt16LE(pos + 28);
+    const extraLen         = buf.readUInt16LE(pos + 30);
+    const commentLen       = buf.readUInt16LE(pos + 32);
+    const localOffset      = buf.readUInt32LE(pos + 42);
+    const name             = buf.toString('utf8', pos + 46, pos + 46 + nameLen);
 
-    // Local header has its own extra field length — use it to find data start
     const localNameLen  = buf.readUInt16LE(localOffset + 26);
     const localExtraLen = buf.readUInt16LE(localOffset + 28);
     const dataStart     = localOffset + 30 + localNameLen + localExtraLen;
@@ -101,7 +100,7 @@ function readZip(buf) {
   return entries;
 }
 
-// ─── ZIP writer ───────────────────────────────────────────────────────────────
+// --- ZIP writer ---------------------------------------------------------------
 
 function buildZip(entries) {
   const localParts = [];
@@ -115,40 +114,38 @@ function buildZip(entries) {
     const method     = (isDir || data.length === 0) ? 0 : 8;
     const checksum   = crc32(data);
 
-    // Local file header
     const lh = Buffer.alloc(30 + nameBuf.length);
     lh.writeUInt32LE(0x04034b50, 0);
     lh.writeUInt16LE(20,              4);
     lh.writeUInt16LE(0,               6);
     lh.writeUInt16LE(method,          8);
-    lh.writeUInt16LE(0,              10); // mod time
-    lh.writeUInt16LE(0,              12); // mod date
+    lh.writeUInt16LE(0,              10);
+    lh.writeUInt16LE(0,              12);
     lh.writeUInt32LE(checksum,       14);
     lh.writeUInt32LE(compressed.length, 18);
     lh.writeUInt32LE(data.length,    22);
     lh.writeUInt16LE(nameBuf.length, 26);
-    lh.writeUInt16LE(0,              28); // extra len
+    lh.writeUInt16LE(0,              28);
     nameBuf.copy(lh, 30);
 
-    // Central directory entry
     const cd = Buffer.alloc(46 + nameBuf.length);
     cd.writeUInt32LE(0x02014b50, 0);
     cd.writeUInt16LE(20,              4);
     cd.writeUInt16LE(20,              6);
     cd.writeUInt16LE(0,               8);
     cd.writeUInt16LE(method,         10);
-    cd.writeUInt16LE(0,              12); // mod time
-    cd.writeUInt16LE(0,              14); // mod date
+    cd.writeUInt16LE(0,              12);
+    cd.writeUInt16LE(0,              14);
     cd.writeUInt32LE(checksum,       16);
     cd.writeUInt32LE(compressed.length, 20);
     cd.writeUInt32LE(data.length,    24);
     cd.writeUInt16LE(nameBuf.length, 28);
-    cd.writeUInt16LE(0,              30); // extra len
-    cd.writeUInt16LE(0,              32); // comment len
-    cd.writeUInt16LE(0,              34); // disk start
-    cd.writeUInt16LE(0,              36); // internal attrs
-    cd.writeUInt32LE(0,              38); // external attrs
-    cd.writeUInt32LE(offset,         42); // local header offset
+    cd.writeUInt16LE(0,              30);
+    cd.writeUInt16LE(0,              32);
+    cd.writeUInt16LE(0,              34);
+    cd.writeUInt16LE(0,              36);
+    cd.writeUInt32LE(0,              38);
+    cd.writeUInt32LE(offset,         42);
     nameBuf.copy(cd, 46);
 
     localParts.push(lh, compressed);
@@ -158,19 +155,19 @@ function buildZip(entries) {
 
   const cdBuf = Buffer.concat(cdParts);
   const eocdBuf = Buffer.alloc(22);
-  eocdBuf.writeUInt32LE(0x06054b50, 0);
-  eocdBuf.writeUInt16LE(0,                0 + 4);
-  eocdBuf.writeUInt16LE(0,                0 + 6);
-  eocdBuf.writeUInt16LE(entries.length,   8);
-  eocdBuf.writeUInt16LE(entries.length,  10);
-  eocdBuf.writeUInt32LE(cdBuf.length,    12);
-  eocdBuf.writeUInt32LE(offset,          16);
-  eocdBuf.writeUInt16LE(0,              20);
+  eocdBuf.writeUInt32LE(0x06054b50,  0);
+  eocdBuf.writeUInt16LE(0,           4);
+  eocdBuf.writeUInt16LE(0,           6);
+  eocdBuf.writeUInt16LE(entries.length,  8);
+  eocdBuf.writeUInt16LE(entries.length, 10);
+  eocdBuf.writeUInt32LE(cdBuf.length,  12);
+  eocdBuf.writeUInt32LE(offset,        16);
+  eocdBuf.writeUInt16LE(0,            20);
 
   return Buffer.concat([...localParts, cdBuf, eocdBuf]);
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// --- Helpers ------------------------------------------------------------------
 
 function httpsRequest(method, hostname, path, headers, body) {
   return new Promise((resolve, reject) => {
@@ -249,7 +246,7 @@ function toXmlText(str) {
     .join('</w:t><w:br/><w:t xml:space="preserve">');
 }
 
-// ─── DOCX pre-fill ────────────────────────────────────────────────────────────
+// --- DOCX pre-fill ------------------------------------------------------------
 
 function prefillDocx(buffer, values) {
   const entries  = readZip(buffer);
@@ -263,7 +260,9 @@ function prefillDocx(buffer, values) {
     xml = xml.split('<w:p><w:pPr><w:spacing w:after="300"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Merriweather" w:cs="Merriweather" w:eastAsia="Merriweather" w:hAnsi="Merriweather"/><w:color w:val="555B63"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr><w:t xml:space="preserve">[[sales_rep_name]]</w:t></w:r></w:p>').join('');
   }
 
-  // Remove add-on sections entirely when their clause block is not provided
+  // Remove add-on sections entirely when their clause block is not provided.
+  // For contract_ai_terms_block: update the heading and clause XML strings below
+  // once the AI terms section has been designed and saved in the Word template.
   const addonSections = [
     {
       key:     'contract_bae_clause_block',
@@ -275,14 +274,19 @@ function prefillDocx(buffer, values) {
       heading: '<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:color="B2EDD8" w:sz="8"/></w:pBdr><w:spacing w:after="180" w:before="260"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Special Gothic Expanded" w:cs="Special Gothic Expanded" w:eastAsia="Special Gothic Expanded" w:hAnsi="Special Gothic Expanded"/><w:b/><w:bCs/><w:color w:val="07756C"/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr><w:t xml:space="preserve">Barespace Website Package</w:t></w:r></w:p>',
       clause:  '<w:p><w:pPr><w:pBdr><w:top w:val="single" w:color="B2EDD8" w:sz="4"/><w:bottom w:val="single" w:color="B2EDD8" w:sz="4"/><w:left w:val="single" w:color="B2EDD8" w:sz="4"/><w:right w:val="single" w:color="B2EDD8" w:sz="4"/></w:pBdr><w:shd w:fill="FFF0FF" w:val="clear"/><w:spacing w:after="300"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Merriweather" w:cs="Merriweather" w:eastAsia="Merriweather" w:hAnsi="Merriweather"/><w:i/><w:iCs/><w:color w:val="555B63"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t xml:space="preserve">[[contract_website_clause_block]]</w:t></w:r></w:p>',
     },
+    {
+      key:     'contract_ai_terms_block',
+      heading: '<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:color="B2EDD8" w:sz="8"/></w:pBdr><w:spacing w:after="180" w:before="260"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Special Gothic Expanded" w:cs="Special Gothic Expanded" w:eastAsia="Special Gothic Expanded" w:hAnsi="Special Gothic Expanded"/><w:b/><w:bCs/><w:color w:val="07756C"/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr><w:t xml:space="preserve">AI Services Terms</w:t></w:r></w:p>',
+      clause:  '<w:p><w:pPr><w:pBdr><w:top w:val="single" w:color="B2EDD8" w:sz="4"/><w:bottom w:val="single" w:color="B2EDD8" w:sz="4"/><w:left w:val="single" w:color="B2EDD8" w:sz="4"/><w:right w:val="single" w:color="B2EDD8" w:sz="4"/></w:pBdr><w:shd w:fill="FFF0FF" w:val="clear"/><w:spacing w:after="300"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Merriweather" w:cs="Merriweather" w:eastAsia="Merriweather" w:hAnsi="Merriweather"/><w:i/><w:iCs/><w:color w:val="555B63"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t xml:space="preserve">[[contract_ai_terms_block]]</w:t></w:r></w:p>',
+    },
   ];
   for (const { key, heading, clause } of addonSections) {
-    if (!values[key]) xml = xml.split(heading + clause).join('');
+    if (!values[key] && heading && clause) xml = xml.split(heading + clause).join('');
   }
 
   // Replace [[field_name]] placeholders
   for (const [key, val] of Object.entries(values)) {
-    xml = xml.split(`[[${key}]]`).join(toXmlText(val || ''));
+    xml = xml.split('[[' + key + ']]').join(toXmlText(val || ''));
   }
 
   // Remove pink placeholder backgrounds (keep teal/green table shading)
@@ -297,18 +301,10 @@ function prefillDocx(buffer, values) {
   xml = xml.split(dateLabelPara).join(dateLabelParaBlank);
 
   // Insert page break before "Marketing Costs and Consumption"
-  xml = xml.split(
-    '<w:p><w:pPr><w:spacing w:after="120" w:before="160"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Merriweather" w:cs="Merriweather" w:eastAsia="Merriweather" w:hAnsi="Merriweather"/><w:b/><w:bCs/><w:color w:val="07756C"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t xml:space="preserve">Marketing Costs and Consumption</w:t></w:r></w:p>'
-  ).join(
-    '<w:p><w:pPr><w:pageBreakBefore/><w:spacing w:after="120" w:before="160"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Merriweather" w:cs="Merriweather" w:eastAsia="Merriweather" w:hAnsi="Merriweather"/><w:b/><w:bCs/><w:color w:val="07756C"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t xml:space="preserve">Marketing Costs and Consumption</w:t></w:r></w:p>'
-  );
+  xml = xml.split('<w:p><w:pPr><w:spacing w:after="120" w:before="160"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Merriweather" w:cs="Merriweather" w:eastAsia="Merriweather" w:hAnsi="Merriweather"/><w:b/><w:bCs/><w:color w:val="07756C"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t xml:space="preserve">Marketing Costs and Consumption</w:t></w:r></w:p>').join('<w:p><w:pPr><w:pageBreakBefore/><w:spacing w:after="120" w:before="160"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Merriweather" w:cs="Merriweather" w:eastAsia="Merriweather" w:hAnsi="Merriweather"/><w:b/><w:bCs/><w:color w:val="07756C"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t xml:space="preserve">Marketing Costs and Consumption</w:t></w:r></w:p>');
 
   // Insert page break before "Plan & Pricing"
-  xml = xml.split(
-    '<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:color="B2EDD8" w:sz="8"/></w:pBdr><w:spacing w:after="180" w:before="260"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Special Gothic Expanded" w:cs="Special Gothic Expanded" w:eastAsia="Special Gothic Expanded" w:hAnsi="Special Gothic Expanded"/><w:b/><w:bCs/><w:color w:val="07756C"/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr><w:t xml:space="preserve">Plan &amp; Pricing</w:t></w:r></w:p>'
-  ).join(
-    '<w:p><w:pPr><w:pageBreakBefore/><w:pBdr><w:bottom w:val="single" w:color="B2EDD8" w:sz="8"/></w:pBdr><w:spacing w:after="180" w:before="260"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Special Gothic Expanded" w:cs="Special Gothic Expanded" w:eastAsia="Special Gothic Expanded" w:hAnsi="Special Gothic Expanded"/><w:b/><w:bCs/><w:color w:val="07756C"/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr><w:t xml:space="preserve">Plan &amp; Pricing</w:t></w:r></w:p>'
-  );
+  xml = xml.split('<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:color="B2EDD8" w:sz="8"/></w:pBdr><w:spacing w:after="180" w:before="260"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Special Gothic Expanded" w:cs="Special Gothic Expanded" w:eastAsia="Special Gothic Expanded" w:hAnsi="Special Gothic Expanded"/><w:b/><w:bCs/><w:color w:val="07756C"/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr><w:t xml:space="preserve">Plan &amp; Pricing</w:t></w:r></w:p>').join('<w:p><w:pPr><w:pageBreakBefore/><w:pBdr><w:bottom w:val="single" w:color="B2EDD8" w:sz="8"/></w:pBdr><w:spacing w:after="180" w:before="260"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Special Gothic Expanded" w:cs="Special Gothic Expanded" w:eastAsia="Special Gothic Expanded" w:hAnsi="Special Gothic Expanded"/><w:b/><w:bCs/><w:color w:val="07756C"/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr><w:t xml:space="preserve">Plan &amp; Pricing</w:t></w:r></w:p>');
 
   docEntry.data = Buffer.from(xml, 'utf8');
   return buildZip(entries);
@@ -327,7 +323,7 @@ async function getOwnerName(ownerId) {
   return '';
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// --- Main ---------------------------------------------------------------------
 
 exports.main = async (event, callback) => {
   const p = event.inputFields;
@@ -343,7 +339,6 @@ exports.main = async (event, callback) => {
   if (!p.contract_monthly_subscription_display) missing.push('contract_monthly_subscription_display');
   if (!p.contract_pricing_summary)              missing.push('contract_pricing_summary');
   if (!p.contract_pricing_breakdown_table)      missing.push('contract_pricing_breakdown_table');
-  if (!p.contract_setup_fee_display)            missing.push('contract_setup_fee_display');
   if (!p.contract_vat_rate_display)             missing.push('contract_vat_rate_display');
   if (missing.length > 0) throw new Error('Missing required fields: ' + missing.join(', '));
 
@@ -365,12 +360,11 @@ exports.main = async (event, callback) => {
     contract_card_rate_disclosure:         p.contract_card_rate_disclosure,
     contract_manual_email_rate:            p.contract_manual_email_rate,
     contract_manual_sms_rate:              p.contract_manual_sms_rate,
-    contract_setup_fee_display:            p.contract_setup_fee_display,
-    contract_setup_discount_display:       p.contract_setup_discount_display,
     contract_vat_rate_display:             p.contract_vat_rate_display,
-    contract_setup_total_due_display:      p.contract_setup_total_due_display,
+    contract_concierge_description:        p.contract_concierge_description,
     contract_bae_clause_block:             p.contract_bae_clause_block,
     contract_website_clause_block:         p.contract_website_clause_block,
+    contract_ai_terms_block:               p.contract_ai_terms_block,
     contact_full_name:                     ((p.firstname || '') + ' ' + (p.lastname || '')).trim(),
     sales_rep_name:                        await getOwnerName(p.sales_rep_name),
     contract_effective_date:               effectiveDate,
@@ -396,7 +390,7 @@ exports.main = async (event, callback) => {
     auth,
     {
       status: 'sent',
-      emailSubject: 'Your Barespace Subscription Agreement — ' + p.dealname,
+      emailSubject: 'Your Barespace Subscription Agreement \u2014 ' + p.dealname,
       recipients: {
         signers: [{
           email:        p.signer_email,
