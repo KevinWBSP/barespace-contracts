@@ -25,7 +25,7 @@
  *   contract_card_rate_disclosure, contract_pricing_summary,
  *   contract_pricing_breakdown_table,
  *   contract_bae_clause_block, contract_website_clause_block,
- *   contract_ai_terms_block,
+ *   contract_ai_terms_block, contract_early_termination_block,
  *   contract_manual_email_rate, contract_manual_sms_rate,
  *   contract_vat_rate_display, contract_concierge_description,
  *   contract_pricing_flag,
@@ -111,6 +111,12 @@ exports.main = async (event, callback) => {
       'Over \u20ac20k':      { pct: 1.0, fixed: 0.10 },
     };
     return map[band] || null;
+  }
+
+  function buildEarlyTerminationBlock() {
+    if (contractLength !== '12-month') return '';
+    var fee = isUK ? '\u00a3500' : '\u20ac500';
+    return 'Early Termination. The Client may terminate this Agreement before the end of the 12-month Subscription Term by giving Barespace no less than 30 days\u2019 written notice and paying an early termination fee of ' + fee + '. Barespace will confirm the termination date in writing upon receipt of the notice and cleared payment. All fees paid prior to the effective termination date are non-refundable.';
   }
 
   function buildAiTermsBlock() {
@@ -295,6 +301,7 @@ exports.main = async (event, callback) => {
       contract_bae_clause_block:             '',
       contract_website_clause_block:         '',
       contract_ai_terms_block:               '',
+      contract_early_termination_block:      '',
       contract_manual_email_rate:            manualEmailRateDisplay,
       contract_manual_sms_rate:              manualSmsRateDisplay,
       contract_vat_rate_display:             '',
@@ -399,6 +406,7 @@ exports.main = async (event, callback) => {
         contract_bae_clause_block:             '',
         contract_website_clause_block:         '',
         contract_ai_terms_block:               '',
+        contract_early_termination_block:      '',
         contract_manual_email_rate:            manualEmailRateDisplay,
         contract_manual_sms_rate:              manualSmsRateDisplay,
         contract_vat_rate_display:             vatRateDisplay,
@@ -485,10 +493,11 @@ exports.main = async (event, callback) => {
         contract_card_rate_disclosure:         cardRateDisclosure,
         contract_pricing_summary:              sentencesOvr.join(' '),
         contract_pricing_breakdown_table:      buildBreakdown({ subscriptionLines: subLinesOvr, addonBaePrice: addonBaePrice, addonWebsitePrice: addonWebsitePrice, addonVoicePrice: addonVoicePrice, addonPulsePrice: addonPulsePrice, baeHasOverride: baeHasOverride, websiteHasOverride: websiteHasOverride, voiceHasOverride: voiceHasOverride, pulseHasOverride: pulseHasOverride, cardRateDisclosure: cardRateDisclosure, cardRateDisclosureText: cardRateDisclosureText, totalLabel: 'Total Monthly Subscription', totalAmount: monthlyFinalOvr, baeBasePrice: baeBasePrice, baeDiscountApplied: addonBae && baeEffectivePct > 0, baeDiscountAmount: baeDiscountAmount, baeDiscountPctNum: baeEffectivePct, websiteBasePrice: websiteBasePrice, websiteDiscountApplied: addonWebsite && websiteEffectivePct > 0, websiteDiscountAmount: websiteDiscountAmount, websiteDiscountPctNum: websiteEffectivePct, voiceBasePrice: voiceBasePrice, voiceDiscountApplied: addonVoice && voiceEffectivePct > 0, voiceDiscountAmount: voiceDiscountAmount, voiceDiscountPctNum: voiceEffectivePct, pulseBasePrice: pulseBasePrice, pulseDiscountApplied: addonPulse && pulseEffectivePct > 0, pulseDiscountAmount: pulseDiscountAmount, pulseDiscountPctNum: pulseEffectivePct }),
-        contract_bae_clause_block:      clauseBlocksOvr.bae,
-        contract_website_clause_block:  clauseBlocksOvr.website,
-        contract_ai_terms_block:        buildAiTermsBlock(),
-        contract_manual_email_rate:     manualEmailRateDisplay,
+        contract_bae_clause_block:           clauseBlocksOvr.bae,
+        contract_website_clause_block:       clauseBlocksOvr.website,
+        contract_ai_terms_block:             buildAiTermsBlock(),
+        contract_early_termination_block:    buildEarlyTerminationBlock(),
+        contract_manual_email_rate:          manualEmailRateDisplay,
         contract_manual_sms_rate:       manualSmsRateDisplay,
         contract_vat_rate_display:      vatRateDisplay,
         contract_concierge_description: conciergeDescription,
@@ -565,10 +574,11 @@ exports.main = async (event, callback) => {
         contract_card_rate_disclosure:         cardRateDisclosure,
         contract_pricing_summary:              sentencesStd.join(' '),
         contract_pricing_breakdown_table:      buildBreakdown({ subscriptionLines: subLinesStd, addonBaePrice: addonBaePrice, addonWebsitePrice: addonWebsitePrice, addonVoicePrice: addonVoicePrice, addonPulsePrice: addonPulsePrice, baeHasOverride: baeHasOverride, websiteHasOverride: websiteHasOverride, voiceHasOverride: voiceHasOverride, pulseHasOverride: pulseHasOverride, cardRateDisclosure: cardRateDisclosure, cardRateDisclosureText: cardRateDisclosureText, totalLabel: 'Total Monthly Subscription', totalAmount: monthlyFinalStd, baeBasePrice: baeBasePrice, baeDiscountApplied: addonBae && baeEffectivePct > 0, baeDiscountAmount: baeDiscountAmount, baeDiscountPctNum: baeEffectivePct, websiteBasePrice: websiteBasePrice, websiteDiscountApplied: addonWebsite && websiteEffectivePct > 0, websiteDiscountAmount: websiteDiscountAmount, websiteDiscountPctNum: websiteEffectivePct, voiceBasePrice: voiceBasePrice, voiceDiscountApplied: addonVoice && voiceEffectivePct > 0, voiceDiscountAmount: voiceDiscountAmount, voiceDiscountPctNum: voiceEffectivePct, pulseBasePrice: pulseBasePrice, pulseDiscountApplied: addonPulse && pulseEffectivePct > 0, pulseDiscountAmount: pulseDiscountAmount, pulseDiscountPctNum: pulseEffectivePct }),
-        contract_bae_clause_block:      clauseBlocksStd.bae,
-        contract_website_clause_block:  clauseBlocksStd.website,
-        contract_ai_terms_block:        buildAiTermsBlock(),
-        contract_manual_email_rate:     manualEmailRateDisplay,
+        contract_bae_clause_block:           clauseBlocksStd.bae,
+        contract_website_clause_block:       clauseBlocksStd.website,
+        contract_ai_terms_block:             buildAiTermsBlock(),
+        contract_early_termination_block:    buildEarlyTerminationBlock(),
+        contract_manual_email_rate:          manualEmailRateDisplay,
         contract_manual_sms_rate:       manualSmsRateDisplay,
         contract_vat_rate_display:      vatRateDisplay,
         contract_concierge_description: conciergeDescription,
