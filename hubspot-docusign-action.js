@@ -266,7 +266,7 @@ function prefillDocx(buffer, values) {
   const addonSections = [
     {
       key:     'contract_bae_clause_block',
-      heading: '<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:color="B2EDD8" w:sz="8"/></w:pBdr><w:spacing w:after="180" w:before="260"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Special Gothic Expanded" w:cs="Special Gothic Expanded" w:eastAsia="Special Gothic Expanded" w:hAnsi="Special Gothic Expanded"/><w:b/><w:bCs/><w:color w:val="07756C"/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr><w:t xml:space="preserve">Barespace Automated Marketing (BAE) Package</w:t></w:r></w:p>',
+      heading: '<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:color="B2EDD8" w:sz="8"/></w:pBdr><w:spacing w:after="180" w:before="260"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Special Gothic Expanded" w:cs="Special Gothic Expanded" w:eastAsia="Special Gothic Expanded" w:hAnsi="Special Gothic Expanded"/><w:b/><w:bCs/><w:color w:val="07756C"/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr><w:t xml:space="preserve">Barespace Growth Package</w:t></w:r></w:p>',
       clause:  '<w:p><w:pPr><w:pBdr><w:top w:val="single" w:color="B2EDD8" w:sz="4"/><w:bottom w:val="single" w:color="B2EDD8" w:sz="4"/><w:left w:val="single" w:color="B2EDD8" w:sz="4"/><w:right w:val="single" w:color="B2EDD8" w:sz="4"/></w:pBdr><w:shd w:fill="FFF0FF" w:val="clear"/><w:spacing w:after="300"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Merriweather" w:cs="Merriweather" w:eastAsia="Merriweather" w:hAnsi="Merriweather"/><w:i/><w:iCs/><w:color w:val="555B63"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr><w:t xml:space="preserve">[[contract_bae_clause_block]]</w:t></w:r></w:p>',
     },
     {

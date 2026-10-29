@@ -4,17 +4,17 @@
  *
  * INPUT FIELDS (map in the action's "Input fields" panel):
  *   pricing_tier, card_processing_included,
- *   add_on_bae, add_on_website, add_on_voice, add_on_pulse,
+ *   add_on_bae (Growth), add_on_website, add_on_voice (Receptionist), add_on_pulse (Operator),
  *   contract_length, payment_frequency,
  *   number_of_locations, number_of_staff, card_volume_band,
  *   manual_price_override,
- *   addon_bae_price_override, addon_website_price_override,
- *   addon_voice_price_override, addon_pulse_price_override,
+ *   addon_bae_price_override (Growth & Operator bundle negotiated rate), addon_website_price_override,
+ *   addon_voice_price_override (Receptionist negotiated rate),
  *   card_rate_pct_override, card_rate_fixed_override,
  *   email_rate, sms_rate,
  *   subscription_discount_pct,
- *   addon_bae_discount_pct, addon_website_discount_pct,
- *   addon_voice_discount_pct, addon_pulse_discount_pct,
+ *   addon_bae_discount_pct (Growth & Operator bundle discount), addon_website_discount_pct,
+ *   addon_voice_discount_pct (Receptionist discount),
  *   pipeline, deal_name, sales_rep_name,
  *   recipient_email, recipient_first_name, recipient_last_name
  *
@@ -24,14 +24,14 @@
  *   contract_discount_percentage_applied, contract_add_ons_summary,
  *   contract_card_rate_disclosure, contract_pricing_summary,
  *   contract_pricing_breakdown_table,
- *   contract_bae_clause_block, contract_website_clause_block,
+ *   contract_bae_clause_block (Growth clause), contract_website_clause_block,
  *   contract_ai_terms_block, contract_early_termination,
  *   contract_manual_email_rate, contract_manual_sms_rate,
  *   contract_vat_rate_display, contract_concierge_description,
  *   contract_pricing_flag,
  *   subscription_discount_pct,
- *   addon_bae_discount_pct, addon_website_discount_pct,
- *   addon_voice_discount_pct, addon_pulse_discount_pct
+ *   addon_bae_discount_pct (Growth & Operator), addon_website_discount_pct,
+ *   addon_voice_discount_pct (Receptionist), addon_pulse_discount_pct (mirrors bundle discount)
  */
 
 const hubspot = require('@hubspot/api-client');
@@ -41,31 +41,31 @@ exports.main = async (event, callback) => {
 
   const tier              = (inputs.pricing_tier || '').trim();
   const cardIncluded      = (inputs.card_processing_included || 'Yes').trim();
-  const addonBae          = String(inputs.add_on_bae     || '').trim().toLowerCase() === 'yes' || inputs.add_on_bae     === true;
+  // HubSpot internal property names kept for compatibility; display names: BAE→Growth, Pulse→Operator, Voice→Receptionist
+  const addonGrowth       = String(inputs.add_on_bae     || '').trim().toLowerCase() === 'yes' || inputs.add_on_bae     === true;
   const addonWebsite      = String(inputs.add_on_website || '').trim().toLowerCase() === 'yes' || inputs.add_on_website === true;
-  const addonVoice        = String(inputs.add_on_voice   || '').trim().toLowerCase() === 'yes' || inputs.add_on_voice   === true;
-  const addonPulse        = String(inputs.add_on_pulse   || '').trim().toLowerCase() === 'yes' || inputs.add_on_pulse   === true;
+  const addonReceptionist = String(inputs.add_on_voice   || '').trim().toLowerCase() === 'yes' || inputs.add_on_voice   === true;
+  const addonOperator     = String(inputs.add_on_pulse   || '').trim().toLowerCase() === 'yes' || inputs.add_on_pulse   === true;
+  const addonGrowthOrOperator = addonGrowth || addonOperator;
   const contractLength    = (inputs.contract_length    || '12-month').trim();
   const paymentFrequency  = (inputs.payment_frequency  || 'Monthly').trim();
   const numberOfLocations = (inputs.number_of_locations || '1 Location').trim();
   const numberOfStaff     = parseInt(inputs.number_of_staff, 10) || 1;
   const cardVolumeBand    = (inputs.card_volume_band || '').trim();
 
-  const manualOverride        = inputs.manual_price_override;
-  const manualEmailRate       = inputs.email_rate;
-  const manualSmsRate         = inputs.sms_rate;
-  const baePriceOverride      = inputs.addon_bae_price_override;
-  const websitePriceOverride  = inputs.addon_website_price_override;
-  const voicePriceOverride    = inputs.addon_voice_price_override;
-  const pulsePriceOverride    = inputs.addon_pulse_price_override;
-  const cardRatePctOverride   = inputs.card_rate_pct_override;
-  const cardRateFixedOverride = inputs.card_rate_fixed_override;
+  const manualOverride              = inputs.manual_price_override;
+  const manualEmailRate             = inputs.email_rate;
+  const manualSmsRate               = inputs.sms_rate;
+  const growthOperatorPriceOverride = inputs.addon_bae_price_override;    // shared bundle override
+  const websitePriceOverride        = inputs.addon_website_price_override;
+  const receptionistPriceOverride   = inputs.addon_voice_price_override;
+  const cardRatePctOverride         = inputs.card_rate_pct_override;
+  const cardRateFixedOverride       = inputs.card_rate_fixed_override;
 
-  const subscriptionDiscountPct = inputs.subscription_discount_pct;
-  const baeDiscountPct          = inputs.addon_bae_discount_pct;
-  const websiteDiscountPct      = inputs.addon_website_discount_pct;
-  const voiceDiscountPct        = inputs.addon_voice_discount_pct;
-  const pulseDiscountPct        = inputs.addon_pulse_discount_pct;
+  const subscriptionDiscountPct        = inputs.subscription_discount_pct;
+  const growthOperatorDiscountPctInput = inputs.addon_bae_discount_pct;   // shared bundle discount
+  const websiteDiscountPct             = inputs.addon_website_discount_pct;
+  const receptionistDiscountPctInput   = inputs.addon_voice_discount_pct;
 
   const onlineDepositsUsed = String(inputs.online_deposits_used || '').trim().toLowerCase() === 'yes' || inputs.online_deposits_used === true;
 
@@ -99,10 +99,10 @@ exports.main = async (event, callback) => {
 
   var BASE_PRICE_CARD_INCLUDED = { Solo: 79,  Base: 114, Core: 139 };
   var BASE_PRICE_NO_CARD       = { Solo: 64,  Base: 99,  Core: 139 };
-  var ADDON_PRICE              = { Solo: 50,  Base: 75,  Core: 100 };
-  var VOICE_PRICE_ONE_STAFF    = 99;
-  var VOICE_PRICE_MULTI_STAFF  = 249;
-  var PULSE_PRICE              = 99;
+  // Growth + Operator: same bundle price whether one or both are selected
+  var OPERATOR_GROWTH_PRICE    = { Solo: 100, Base: 150, Core: 199 };
+  var RECEPTIONIST_PRICE       = { Solo: 99,  Base: 249, Core: 299 };
+  var WEBSITE_PRICE            = { Solo: 50,  Base: 75,  Core: 100 };
 
   function cardRateData(band) {
     var map = {
@@ -120,15 +120,15 @@ exports.main = async (event, callback) => {
   }
 
   function buildAiTermsBlock() {
-    if (!addonVoice && !addonPulse) return '';
+    if (!addonReceptionist && !addonOperator) return '';
 
     var jurisdictionBlock = isUK
       ? 'United Kingdom. This Agreement is governed by the law of England and Wales and the courts of England and Wales have exclusive jurisdiction. The Customer agrees that, having regard to the Fees, its ability to check AI Output and to insure, and its opportunity to negotiate, clauses 6, 7 and 8 are fair and reasonable for the purposes of the Unfair Contract Terms Act 1977 and the Misrepresentation Act 1967. Late payments carry interest and compensation under the Late Payment of Commercial Debts (Interest) Act 1998. The Contracts (Rights of Third Parties) Act 1999 does not apply. The UK GDPR and the Data Protection Act 2018 apply.'
-      : 'Ireland. This Agreement is governed by the laws of Ireland and the courts of Ireland have exclusive jurisdiction. The Customer agrees that clauses 6, 7 and 8 are fair and reasonable, including for the purposes of the Sale of Goods and Supply of Services Act 1980. Late payments carry interest and costs under the European Communities (Late Payment in Commercial Transactions) Regulations 2012. Voice Receptionist discloses that it is an AI as Article 50 of the EU AI Act requires. The GDPR and the Data Protection Act 2018 apply.';
+      : 'Ireland. This Agreement is governed by the laws of Ireland and the courts of Ireland have exclusive jurisdiction. The Customer agrees that clauses 6, 7 and 8 are fair and reasonable, including for the purposes of the Sale of Goods and Supply of Services Act 1980. Late payments carry interest and costs under the European Communities (Late Payment in Commercial Transactions) Regulations 2012. Receptionist discloses that it is an AI as Article 50 of the EU AI Act requires. The GDPR and the Data Protection Act 2018 apply.';
 
     return [
       '1. Nature of AI. The Services use artificial intelligence, which can mishear, misunderstand, misstate or act incorrectly. AI Output (including bookings, cancellations, changes, reports and financial figures) is an aid only and is not guaranteed to be accurate, complete or timely.',
-      '2. Customer responsibility. The Customer is solely responsible for its configuration (services, prices, hours, staff and policies), for who has access, and for its diary, finances, tax and legal compliance. The Customer must (a) review its diary at least [daily], (b) keep automatic booking confirmations switched on, (c) review changes made by Pulse, and (d) check financial figures against source records before relying on them. The Customer must not use Pulse output for payroll, commission or tax filings without independent verification.',
+      '2. Customer responsibility. The Customer is solely responsible for its configuration (services, prices, hours, staff and policies), for who has access, and for its diary, finances, tax and legal compliance. The Customer must (a) review its diary at least [daily], (b) keep automatic booking confirmations switched on, (c) review changes made by Operator, and (d) check financial figures against source records before relying on them. The Customer must not use Operator output for payroll, commission or tax filings without independent verification.',
       '3. Authorised Instructions. The Customer is bound by every instruction or approval given through the Services using its users\u2019 credentials, as the AI interprets it, and is responsible for user access.',
       '4. No advice. AI Output is not accounting, tax, legal, medical, health, allergy or safety advice. The Services are not for emergencies. The Customer remains responsible for consultations, patch tests, consents and treatment suitability.',
       '5. Reporting errors. The Customer must report any suspected error within [7] days and take reasonable steps to limit its effect. Barespace\u2019s logs, transcripts and records are conclusive evidence of what the Services received and did, unless there is a manifest error.',
@@ -138,53 +138,54 @@ exports.main = async (event, callback) => {
       '9. Liability that is not limited. Nothing in this Agreement limits liability for death or personal injury caused by negligence, for fraud, or for anything that cannot lawfully be limited.',
       '10. Indemnity. The Customer will indemnify Barespace against third-party claims (including from Customer Clients and regulators), and the resulting losses and reasonable legal costs, arising from the Customer\u2019s configuration, data or policies, Authorised Instructions, or breach of these terms.',
       '11. Third parties and availability. The Services depend on third parties and Barespace does not guarantee uninterrupted or error-free operation. Barespace may update models, features and providers at any time. Barespace owes no duty to Customer Clients.',
-      '12. Calls and data. Calls may be recorded and transcribed. Voice Receptionist will tell callers it is an AI, and the Customer must not disable this and must give callers any recording notices the law requires. Barespace processes Customer Client personal data as processor under the data processing agreement.',
+      '12. Calls and data. Calls may be recorded and transcribed. Receptionist will tell callers it is an AI, and the Customer must not disable this and must give callers any recording notices the law requires. Barespace processes Customer Client personal data as processor under the data processing agreement.',
       '13. Business use. The Customer confirms it is a business using the Services for its trade or profession and in connection with its main business activity.',
       '14. Precedence. These terms prevail over any conflicting term about the Services.',
       jurisdictionBlock,
     ].join('\n\n');
   }
 
+  // Returns the display label for the Growth/Operator bundle based on which are selected
+  function growthOperatorLabel() {
+    if (addonGrowth && addonOperator) return 'Growth & Operator';
+    if (addonGrowth)                  return 'Growth';
+    return 'Operator';
+  }
+
   function buildBreakdown(opts) {
-    var subscriptionLines    = opts.subscriptionLines;
-    var addonBaePrice        = opts.addonBaePrice;
-    var addonWebsitePrice    = opts.addonWebsitePrice;
-    var addonVoicePrice      = opts.addonVoicePrice;
-    var addonPulsePrice      = opts.addonPulsePrice;
-    var baeHasOverride       = opts.baeHasOverride;
-    var websiteHasOverride   = opts.websiteHasOverride;
-    var voiceHasOverride     = opts.voiceHasOverride;
-    var pulseHasOverride     = opts.pulseHasOverride;
-    var cardRateDisclosure     = opts.cardRateDisclosure;
-    var cardRateDisclosureText = opts.cardRateDisclosureText || '';
-    var totalLabel           = opts.totalLabel;
-    var totalAmount          = opts.totalAmount;
-    var baeBasePrice         = opts.baeBasePrice     || 0;
-    var baeDiscountApplied   = opts.baeDiscountApplied   || false;
-    var baeDiscountAmount    = opts.baeDiscountAmount    || 0;
-    var baeDiscountPctNum    = opts.baeDiscountPctNum    || 0;
-    var websiteBasePrice     = opts.websiteBasePrice  || 0;
-    var websiteDiscountApplied = opts.websiteDiscountApplied || false;
-    var websiteDiscountAmount  = opts.websiteDiscountAmount  || 0;
-    var websiteDiscountPctNum  = opts.websiteDiscountPctNum  || 0;
-    var voiceBasePrice       = opts.voiceBasePrice    || 0;
-    var voiceDiscountApplied = opts.voiceDiscountApplied || false;
-    var voiceDiscountAmount  = opts.voiceDiscountAmount  || 0;
-    var voiceDiscountPctNum  = opts.voiceDiscountPctNum  || 0;
-    var pulseBasePrice       = opts.pulseBasePrice    || 0;
-    var pulseDiscountApplied = opts.pulseDiscountApplied || false;
-    var pulseDiscountAmount  = opts.pulseDiscountAmount  || 0;
-    var pulseDiscountPctNum  = opts.pulseDiscountPctNum  || 0;
+    var subscriptionLines             = opts.subscriptionLines;
+    var addonGrowthOperatorPrice      = opts.addonGrowthOperatorPrice;
+    var addonWebsitePrice             = opts.addonWebsitePrice;
+    var addonReceptionistPrice        = opts.addonReceptionistPrice;
+    var growthOperatorHasOverride     = opts.growthOperatorHasOverride;
+    var websiteHasOverride            = opts.websiteHasOverride;
+    var receptionistHasOverride       = opts.receptionistHasOverride;
+    var cardRateDisclosure            = opts.cardRateDisclosure;
+    var cardRateDisclosureText        = opts.cardRateDisclosureText || '';
+    var totalLabel                    = opts.totalLabel;
+    var totalAmount                   = opts.totalAmount;
+    var growthOperatorBasePrice       = opts.growthOperatorBasePrice       || 0;
+    var growthOperatorDiscountApplied = opts.growthOperatorDiscountApplied || false;
+    var growthOperatorDiscountAmount  = opts.growthOperatorDiscountAmount  || 0;
+    var growthOperatorDiscountPctNum  = opts.growthOperatorDiscountPctNum  || 0;
+    var websiteBasePrice              = opts.websiteBasePrice              || 0;
+    var websiteDiscountApplied        = opts.websiteDiscountApplied        || false;
+    var websiteDiscountAmount         = opts.websiteDiscountAmount         || 0;
+    var websiteDiscountPctNum         = opts.websiteDiscountPctNum         || 0;
+    var receptionistBasePrice         = opts.receptionistBasePrice         || 0;
+    var receptionistDiscountApplied   = opts.receptionistDiscountApplied   || false;
+    var receptionistDiscountAmount    = opts.receptionistDiscountAmount    || 0;
+    var receptionistDiscountPctNum    = opts.receptionistDiscountPctNum    || 0;
 
     var lines = subscriptionLines.slice();
 
-    if (addonBae) {
-      var baeLabel = baeHasOverride ? 'Bae Add-on (Negotiated Rate)' : 'Bae Add-on';
-      if (baeDiscountApplied) {
-        lines.push(baeLabel + ': ' + fmt(baeBasePrice) + '/month');
-        lines.push('Bae Add-on Discount (' + baeDiscountPctNum + '%): -' + fmt(baeDiscountAmount) + '/month');
+    if (addonGrowthOrOperator) {
+      var goLabel = growthOperatorLabel() + ' Add-on' + (growthOperatorHasOverride ? ' (Negotiated Rate)' : '');
+      if (growthOperatorDiscountApplied) {
+        lines.push(goLabel + ': ' + fmt(growthOperatorBasePrice) + '/month');
+        lines.push(growthOperatorLabel() + ' Add-on Discount (' + growthOperatorDiscountPctNum + '%): -' + fmt(growthOperatorDiscountAmount) + '/month');
       } else {
-        lines.push(baeLabel + ': ' + fmt(addonBaePrice) + '/month');
+        lines.push(goLabel + ': ' + fmt(addonGrowthOperatorPrice) + '/month');
       }
     }
     if (addonWebsite) {
@@ -196,22 +197,13 @@ exports.main = async (event, callback) => {
         lines.push(websiteLabel + ': ' + fmt(addonWebsitePrice) + '/month');
       }
     }
-    if (addonVoice) {
-      var voiceLabel = voiceHasOverride ? 'Voice Add-on (Negotiated Rate)' : 'Voice Add-on';
-      if (voiceDiscountApplied) {
-        lines.push(voiceLabel + ': ' + fmt(voiceBasePrice) + '/month');
-        lines.push('Voice Add-on Discount (' + voiceDiscountPctNum + '%): -' + fmt(voiceDiscountAmount) + '/month');
+    if (addonReceptionist) {
+      var receptionistLabel = receptionistHasOverride ? 'Receptionist Add-on (Negotiated Rate)' : 'Receptionist Add-on';
+      if (receptionistDiscountApplied) {
+        lines.push(receptionistLabel + ': ' + fmt(receptionistBasePrice) + '/month');
+        lines.push('Receptionist Add-on Discount (' + receptionistDiscountPctNum + '%): -' + fmt(receptionistDiscountAmount) + '/month');
       } else {
-        lines.push(voiceLabel + ': ' + fmt(addonVoicePrice) + '/month');
-      }
-    }
-    if (addonPulse) {
-      var pulseLabel = pulseHasOverride ? 'Pulse Add-on (Negotiated Rate)' : 'Pulse Add-on';
-      if (pulseDiscountApplied) {
-        lines.push(pulseLabel + ': ' + fmt(pulseBasePrice) + '/month');
-        lines.push('Pulse Add-on Discount (' + pulseDiscountPctNum + '%): -' + fmt(pulseDiscountAmount) + '/month');
-      } else {
-        lines.push(pulseLabel + ': ' + fmt(addonPulsePrice) + '/month');
+        lines.push(receptionistLabel + ': ' + fmt(addonReceptionistPrice) + '/month');
       }
     }
 
@@ -229,55 +221,50 @@ exports.main = async (event, callback) => {
   }
 
   function buildClauseBlocks() {
-    var bae = addonBae
-      ? 'Included Services. As part of the Barespace Automated Marketing (BAE) package, you are granted full access to Barespace\u2019s automated email marketing engine. This system operates as an always-on marketing tool designed to improve the client booking journey and support revenue growth through appointment re-bookings, client re-engagement campaigns, service and product upsells, and new client referrals. Campaigns are configured and managed through the Barespace platform based on agreed campaign types and scheduling logic.'
+    var growth = addonGrowth
+      ? 'Included Services. As part of the Barespace Growth package, you are granted full access to Barespace\u2019s automated email marketing engine. This system operates as an always-on marketing tool designed to improve the client booking journey and support revenue growth through appointment re-bookings, client re-engagement campaigns, service and product upsells, and new client referrals. Campaigns are configured and managed through the Barespace platform based on agreed campaign types and scheduling logic.'
       : '';
     var website = addonWebsite
       ? 'Included Services. As part of the Barespace Website package, Barespace will design, build, and publish a website for the Customer\u2019s business, reflecting the Customer\u2019s brand and services to the Customer\u2019s liking. The Provider will work with the Customer to agree layout, content, and design direction prior to publishing, and will incorporate reasonable revisions requested by the Customer during the build process. Once published, Barespace will maintain and host the website for the duration of this Agreement, including ongoing updates to keep the site functioning correctly and reflecting current business information as reasonably requested by the Customer. The website is provided as part of the Website add-on subscription and remains hosted on Barespace\u2019s platform; hosting, publishing, and maintenance cease if the Website add-on is removed from the Customer\u2019s plan or this Agreement ends.'
       : '';
-    return { bae: bae, website: website };
+    return { bae: growth, website: website };
   }
 
   function buildDiscountSentences(opts) {
-    var tier               = opts.tier;
-    var bundleQualifies    = opts.bundleQualifies;
-    var bundleBasePct      = opts.bundleBasePct;
-    var subEffectivePct    = opts.subEffectivePct;
-    var subManualPct       = opts.subManualPct;
-    var locationDiscountPct = opts.locationDiscountPct;
-    var baeEffectivePct    = opts.baeEffectivePct;
-    var baeManualPct       = opts.baeManualPct;
-    var websiteEffectivePct = opts.websiteEffectivePct;
-    var websiteManualPct   = opts.websiteManualPct;
-    var voiceEffectivePct  = opts.voiceEffectivePct;
-    var voiceManualPct     = opts.voiceManualPct;
-    var pulseEffectivePct  = opts.pulseEffectivePct;
-    var pulseManualPct     = opts.pulseManualPct;
+    var tier                       = opts.tier;
+    var bundleQualifies            = opts.bundleQualifies;
+    var bundleBasePct              = opts.bundleBasePct;
+    var subEffectivePct            = opts.subEffectivePct;
+    var subManualPct               = opts.subManualPct;
+    var locationDiscountPct        = opts.locationDiscountPct;
+    var growthOperatorEffectivePct = opts.growthOperatorEffectivePct;
+    var growthOperatorManualPct    = opts.growthOperatorManualPct;
+    var websiteEffectivePct        = opts.websiteEffectivePct;
+    var websiteManualPct           = opts.websiteManualPct;
+    var receptionistEffectivePct   = opts.receptionistEffectivePct;
+    var receptionistManualPct      = opts.receptionistManualPct;
 
     var result = [];
     var allSameBundle = bundleQualifies
       && subEffectivePct === bundleBasePct && subManualPct === 0
-      && (!addonBae     || (baeEffectivePct     === bundleBasePct && baeManualPct     === 0))
-      && (!addonWebsite || (websiteEffectivePct === bundleBasePct && websiteManualPct === 0))
-      && (!addonVoice   || (voiceEffectivePct   === bundleBasePct && voiceManualPct   === 0))
-      && (!addonPulse   || (pulseEffectivePct   === bundleBasePct && pulseManualPct   === 0));
+      && (!addonGrowthOrOperator || (growthOperatorEffectivePct === bundleBasePct && growthOperatorManualPct === 0))
+      && (!addonWebsite          || (websiteEffectivePct        === bundleBasePct && websiteManualPct        === 0))
+      && (!addonReceptionist     || (receptionistEffectivePct   === bundleBasePct && receptionistManualPct   === 0));
 
     if (allSameBundle && subEffectivePct > 0) {
       var items = [tier + ' subscription'];
-      if (addonBae)     items.push('Bae add-on');
-      if (addonWebsite) items.push('Website add-on');
-      if (addonVoice)   items.push('Voice add-on');
-      if (addonPulse)   items.push('Pulse add-on');
+      if (addonGrowthOrOperator) items.push(growthOperatorLabel() + ' add-on');
+      if (addonWebsite)          items.push('Website add-on');
+      if (addonReceptionist)     items.push('Receptionist add-on');
       var formatted = items.length === 1
         ? items[0]
         : items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1];
       result.push('A ' + bundleBasePct + '% multi-service bundle discount has been applied to the ' + formatted + '.');
     } else {
-      if (subEffectivePct > 0)                     result.push('A ' + subEffectivePct + '% discount has been applied to the ' + tier + ' subscription.');
-      if (addonBae     && baeEffectivePct     > 0) result.push('A ' + baeEffectivePct + '% discount has been applied to the Bae add-on.');
-      if (addonWebsite && websiteEffectivePct > 0) result.push('A ' + websiteEffectivePct + '% discount has been applied to the Website add-on.');
-      if (addonVoice   && voiceEffectivePct   > 0) result.push('A ' + voiceEffectivePct + '% discount has been applied to the Voice add-on.');
-      if (addonPulse   && pulseEffectivePct   > 0) result.push('A ' + pulseEffectivePct + '% discount has been applied to the Pulse add-on.');
+      if (subEffectivePct > 0)                                   result.push('A ' + subEffectivePct + '% discount has been applied to the ' + tier + ' subscription.');
+      if (addonGrowthOrOperator && growthOperatorEffectivePct > 0) result.push('A ' + growthOperatorEffectivePct + '% discount has been applied to the ' + growthOperatorLabel() + ' add-on.');
+      if (addonWebsite     && websiteEffectivePct     > 0)       result.push('A ' + websiteEffectivePct + '% discount has been applied to the Website add-on.');
+      if (addonReceptionist && receptionistEffectivePct > 0)     result.push('A ' + receptionistEffectivePct + '% discount has been applied to the Receptionist add-on.');
     }
     if (locationDiscountPct > 0) {
       result.push('A 10% discount has been applied to the base subscription as this is the customer\'s second registered Barespace location.');
@@ -301,7 +288,7 @@ exports.main = async (event, callback) => {
       contract_bae_clause_block:             '',
       contract_website_clause_block:         '',
       contract_ai_terms_block:               '',
-      contract_early_termination:      '',
+      contract_early_termination:            '',
       contract_manual_email_rate:            manualEmailRateDisplay,
       contract_manual_sms_rate:              manualSmsRateDisplay,
       contract_vat_rate_display:             '',
@@ -317,43 +304,36 @@ exports.main = async (event, callback) => {
     var isValidNumber = function(v) { return v !== undefined && v !== null && v !== '' && !isNaN(Number(v)); };
 
     var bundleQualifies = cardIncluded === 'Yes'
-      && (addonBae || addonWebsite || addonVoice || addonPulse)
+      && (addonGrowthOrOperator || addonWebsite || addonReceptionist)
       && contractLength === '12-month';
     var bundleBasePct = bundleQualifies ? 10 : 0;
 
     var subManualPct    = isValidNumber(subscriptionDiscountPct) && Number(subscriptionDiscountPct) > 0 ? Number(subscriptionDiscountPct) : 0;
     var subEffectivePct = subManualPct > 0 ? subManualPct : bundleBasePct;
 
-    var baeHasOverride    = addonBae && isValidNumber(baePriceOverride);
-    var baeBasePrice      = addonBae ? (baeHasOverride ? Number(baePriceOverride) : ADDON_PRICE[tier]) : 0;
-    var baeManualPct      = isValidNumber(baeDiscountPct) && Number(baeDiscountPct) > 0 ? Number(baeDiscountPct) : 0;
-    var baeEffectivePct   = addonBae ? (baeManualPct > 0 ? baeManualPct : bundleBasePct) : 0;
-    var baeDiscountAmount = addonBae ? Math.round(baeBasePrice * (baeEffectivePct / 100) * 100) / 100 : 0;
-    var addonBaePrice     = addonBae ? Math.round((baeBasePrice - baeDiscountAmount) * 100) / 100 : 0;
+    // Growth & Operator: one bundle price, charged once whether Growth alone, Operator alone, or both
+    var growthOperatorHasOverride    = addonGrowthOrOperator && isValidNumber(growthOperatorPriceOverride);
+    var growthOperatorBasePrice      = addonGrowthOrOperator ? (growthOperatorHasOverride ? Number(growthOperatorPriceOverride) : OPERATOR_GROWTH_PRICE[tier]) : 0;
+    var growthOperatorManualPct      = isValidNumber(growthOperatorDiscountPctInput) && Number(growthOperatorDiscountPctInput) > 0 ? Number(growthOperatorDiscountPctInput) : 0;
+    var growthOperatorEffectivePct   = addonGrowthOrOperator ? (growthOperatorManualPct > 0 ? growthOperatorManualPct : bundleBasePct) : 0;
+    var growthOperatorDiscountAmount = addonGrowthOrOperator ? Math.round(growthOperatorBasePrice * (growthOperatorEffectivePct / 100) * 100) / 100 : 0;
+    var addonGrowthOperatorPrice     = addonGrowthOrOperator ? Math.round((growthOperatorBasePrice - growthOperatorDiscountAmount) * 100) / 100 : 0;
 
     var websiteHasOverride    = addonWebsite && isValidNumber(websitePriceOverride);
-    var websiteBasePrice      = addonWebsite ? (websiteHasOverride ? Number(websitePriceOverride) : ADDON_PRICE[tier]) : 0;
+    var websiteBasePrice      = addonWebsite ? (websiteHasOverride ? Number(websitePriceOverride) : WEBSITE_PRICE[tier]) : 0;
     var websiteManualPct      = isValidNumber(websiteDiscountPct) && Number(websiteDiscountPct) > 0 ? Number(websiteDiscountPct) : 0;
     var websiteEffectivePct   = addonWebsite ? (websiteManualPct > 0 ? websiteManualPct : bundleBasePct) : 0;
     var websiteDiscountAmount = addonWebsite ? Math.round(websiteBasePrice * (websiteEffectivePct / 100) * 100) / 100 : 0;
     var addonWebsitePrice     = addonWebsite ? Math.round((websiteBasePrice - websiteDiscountAmount) * 100) / 100 : 0;
 
-    var voiceStandardPrice  = numberOfStaff <= 1 ? VOICE_PRICE_ONE_STAFF : VOICE_PRICE_MULTI_STAFF;
-    var voiceHasOverride    = addonVoice && isValidNumber(voicePriceOverride);
-    var voiceBasePrice      = addonVoice ? (voiceHasOverride ? Number(voicePriceOverride) : voiceStandardPrice) : 0;
-    var voiceManualPct      = isValidNumber(voiceDiscountPct) && Number(voiceDiscountPct) > 0 ? Number(voiceDiscountPct) : 0;
-    var voiceEffectivePct   = addonVoice ? (voiceManualPct > 0 ? voiceManualPct : bundleBasePct) : 0;
-    var voiceDiscountAmount = addonVoice ? Math.round(voiceBasePrice * (voiceEffectivePct / 100) * 100) / 100 : 0;
-    var addonVoicePrice     = addonVoice ? Math.round((voiceBasePrice - voiceDiscountAmount) * 100) / 100 : 0;
+    var receptionistHasOverride    = addonReceptionist && isValidNumber(receptionistPriceOverride);
+    var receptionistBasePrice      = addonReceptionist ? (receptionistHasOverride ? Number(receptionistPriceOverride) : RECEPTIONIST_PRICE[tier]) : 0;
+    var receptionistManualPct      = isValidNumber(receptionistDiscountPctInput) && Number(receptionistDiscountPctInput) > 0 ? Number(receptionistDiscountPctInput) : 0;
+    var receptionistEffectivePct   = addonReceptionist ? (receptionistManualPct > 0 ? receptionistManualPct : bundleBasePct) : 0;
+    var receptionistDiscountAmount = addonReceptionist ? Math.round(receptionistBasePrice * (receptionistEffectivePct / 100) * 100) / 100 : 0;
+    var addonReceptionistPrice     = addonReceptionist ? Math.round((receptionistBasePrice - receptionistDiscountAmount) * 100) / 100 : 0;
 
-    var pulseHasOverride    = addonPulse && isValidNumber(pulsePriceOverride);
-    var pulseBasePrice      = addonPulse ? (pulseHasOverride ? Number(pulsePriceOverride) : PULSE_PRICE) : 0;
-    var pulseManualPct      = isValidNumber(pulseDiscountPct) && Number(pulseDiscountPct) > 0 ? Number(pulseDiscountPct) : 0;
-    var pulseEffectivePct   = addonPulse ? (pulseManualPct > 0 ? pulseManualPct : bundleBasePct) : 0;
-    var pulseDiscountAmount = addonPulse ? Math.round(pulseBasePrice * (pulseEffectivePct / 100) * 100) / 100 : 0;
-    var addonPulsePrice     = addonPulse ? Math.round((pulseBasePrice - pulseDiscountAmount) * 100) / 100 : 0;
-
-    var addonsTotal = addonBaePrice + addonWebsitePrice + addonVoicePrice + addonPulsePrice;
+    var addonsTotal = addonGrowthOperatorPrice + addonWebsitePrice + addonReceptionistPrice;
 
     var cardRateHasOverride = isValidNumber(cardRatePctOverride) || isValidNumber(cardRateFixedOverride);
     var standardRate = cardRateData(cardVolumeBand);
@@ -383,14 +363,51 @@ exports.main = async (event, callback) => {
     }
 
     var addonsSummaryParts = [];
-    if (addonBae)     addonsSummaryParts.push('Bae');
-    if (addonWebsite) addonsSummaryParts.push('Website');
-    if (addonVoice)   addonsSummaryParts.push('Voice');
-    if (addonPulse)   addonsSummaryParts.push('Pulse');
+    if (addonGrowth)       addonsSummaryParts.push('Growth');
+    if (addonOperator)     addonsSummaryParts.push('Operator');
+    if (addonWebsite)      addonsSummaryParts.push('Website');
+    if (addonReceptionist) addonsSummaryParts.push('Receptionist');
     var addonsSummary = addonsSummaryParts.join(', ') || 'None';
 
     var isThirdPlusLocation = numberOfLocations.indexOf('3+') === 0;
     var hasManualOverride   = manualOverride !== undefined && manualOverride !== null && manualOverride !== '' && !isNaN(Number(manualOverride));
+
+    var breakdownOpts = {
+      addonGrowthOperatorPrice:      addonGrowthOperatorPrice,
+      addonWebsitePrice:             addonWebsitePrice,
+      addonReceptionistPrice:        addonReceptionistPrice,
+      growthOperatorHasOverride:     growthOperatorHasOverride,
+      websiteHasOverride:            websiteHasOverride,
+      receptionistHasOverride:       receptionistHasOverride,
+      cardRateDisclosure:            cardRateDisclosure,
+      cardRateDisclosureText:        cardRateDisclosureText,
+      growthOperatorBasePrice:       growthOperatorBasePrice,
+      growthOperatorDiscountApplied: addonGrowthOrOperator && growthOperatorEffectivePct > 0,
+      growthOperatorDiscountAmount:  growthOperatorDiscountAmount,
+      growthOperatorDiscountPctNum:  growthOperatorEffectivePct,
+      websiteBasePrice:              websiteBasePrice,
+      websiteDiscountApplied:        addonWebsite && websiteEffectivePct > 0,
+      websiteDiscountAmount:         websiteDiscountAmount,
+      websiteDiscountPctNum:         websiteEffectivePct,
+      receptionistBasePrice:         receptionistBasePrice,
+      receptionistDiscountApplied:   addonReceptionist && receptionistEffectivePct > 0,
+      receptionistDiscountAmount:    receptionistDiscountAmount,
+      receptionistDiscountPctNum:    receptionistEffectivePct,
+    };
+
+    var discountSentsOpts = {
+      tier: tier,
+      bundleQualifies: bundleQualifies,
+      bundleBasePct: bundleBasePct,
+      subEffectivePct: subEffectivePct,
+      subManualPct: subManualPct,
+      growthOperatorEffectivePct: growthOperatorEffectivePct,
+      growthOperatorManualPct: growthOperatorManualPct,
+      websiteEffectivePct: websiteEffectivePct,
+      websiteManualPct: websiteManualPct,
+      receptionistEffectivePct: receptionistEffectivePct,
+      receptionistManualPct: receptionistManualPct,
+    };
 
     if (isThirdPlusLocation && !hasManualOverride) {
       outputProps = {
@@ -406,7 +423,7 @@ exports.main = async (event, callback) => {
         contract_bae_clause_block:             '',
         contract_website_clause_block:         '',
         contract_ai_terms_block:               '',
-        contract_early_termination:      '',
+        contract_early_termination:            '',
         contract_manual_email_rate:            manualEmailRateDisplay,
         contract_manual_sms_rate:              manualSmsRateDisplay,
         contract_vat_rate_display:             vatRateDisplay,
@@ -447,8 +464,7 @@ exports.main = async (event, callback) => {
       var sentencesOvr = [];
       sentencesOvr.push('This agreement is for the Barespace ' + tier + ' plan at a negotiated base subscription rate of ' + fmt(overrideAmount) + '/month, as agreed directly between Barespace and the customer.');
       sentencesOvr.push(addonsSummary === 'None' ? 'No add-on services are included in this agreement.' : 'This agreement includes the following add-on service(s): ' + addonsSummary + '.');
-      var discountSentsOvr = buildDiscountSentences({ tier: tier, bundleQualifies: bundleQualifies, bundleBasePct: bundleBasePct, subEffectivePct: subEffectivePct, subManualPct: subManualPct, locationDiscountPct: locationDiscountPct, baeEffectivePct: baeEffectivePct, baeManualPct: baeManualPct, websiteEffectivePct: websiteEffectivePct, websiteManualPct: websiteManualPct, voiceEffectivePct: voiceEffectivePct, voiceManualPct: voiceManualPct, pulseEffectivePct: pulseEffectivePct, pulseManualPct: pulseManualPct });
-      discountSentsOvr.forEach(function(s) { sentencesOvr.push(s); });
+      buildDiscountSentences(Object.assign({}, discountSentsOpts, { locationDiscountPct: locationDiscountPct })).forEach(function(s) { sentencesOvr.push(s); });
       sentencesOvr.push('Contract term: ' + contractLength + '.');
       if (annualBilledTotalOvr !== null) {
         sentencesOvr.push('Payment: the full amount of ' + fmt(annualBilledTotalOvr) + ' is billed upfront, covering 12 months of service billed at 10 months\u2019 rate.');
@@ -471,13 +487,12 @@ exports.main = async (event, callback) => {
 
       var flagPartsOvr = ['Manual override price used for the base subscription.'];
       var appliedDiscountsOvr = [];
-      if (bundleQualifies)                       appliedDiscountsOvr.push('10% multi-service bundle');
-      if (locationDiscountPct > 0)               appliedDiscountsOvr.push('10% 2nd location');
-      if (subManualPct > 0)                      appliedDiscountsOvr.push(subManualPct + '% custom subscription');
-      if (addonBae     && baeManualPct     > 0)  appliedDiscountsOvr.push(baeManualPct + '% custom Bae');
-      if (addonWebsite && websiteManualPct > 0)  appliedDiscountsOvr.push(websiteManualPct + '% custom Website');
-      if (addonVoice   && voiceManualPct   > 0)  appliedDiscountsOvr.push(voiceManualPct + '% custom Voice');
-      if (addonPulse   && pulseManualPct   > 0)  appliedDiscountsOvr.push(pulseManualPct + '% custom Pulse');
+      if (bundleQualifies)                                    appliedDiscountsOvr.push('10% multi-service bundle');
+      if (locationDiscountPct > 0)                            appliedDiscountsOvr.push('10% 2nd location');
+      if (subManualPct > 0)                                   appliedDiscountsOvr.push(subManualPct + '% custom subscription');
+      if (addonGrowthOrOperator && growthOperatorManualPct > 0) appliedDiscountsOvr.push(growthOperatorManualPct + '% custom ' + growthOperatorLabel());
+      if (addonWebsite && websiteManualPct > 0)               appliedDiscountsOvr.push(websiteManualPct + '% custom Website');
+      if (addonReceptionist && receptionistManualPct > 0)     appliedDiscountsOvr.push(receptionistManualPct + '% custom Receptionist');
       flagPartsOvr.push(appliedDiscountsOvr.length > 0
         ? 'Discounts applied on top of override: ' + appliedDiscountsOvr.join(', ') + '. Confirm all figures are correct before sending.'
         : 'No automatic discounts applied. Confirm the override figure is correct before sending.');
@@ -492,21 +507,21 @@ exports.main = async (event, callback) => {
         contract_add_ons_summary:              addonsSummary,
         contract_card_rate_disclosure:         cardRateDisclosure,
         contract_pricing_summary:              sentencesOvr.join(' '),
-        contract_pricing_breakdown_table:      buildBreakdown({ subscriptionLines: subLinesOvr, addonBaePrice: addonBaePrice, addonWebsitePrice: addonWebsitePrice, addonVoicePrice: addonVoicePrice, addonPulsePrice: addonPulsePrice, baeHasOverride: baeHasOverride, websiteHasOverride: websiteHasOverride, voiceHasOverride: voiceHasOverride, pulseHasOverride: pulseHasOverride, cardRateDisclosure: cardRateDisclosure, cardRateDisclosureText: cardRateDisclosureText, totalLabel: 'Total Monthly Subscription', totalAmount: monthlyFinalOvr, baeBasePrice: baeBasePrice, baeDiscountApplied: addonBae && baeEffectivePct > 0, baeDiscountAmount: baeDiscountAmount, baeDiscountPctNum: baeEffectivePct, websiteBasePrice: websiteBasePrice, websiteDiscountApplied: addonWebsite && websiteEffectivePct > 0, websiteDiscountAmount: websiteDiscountAmount, websiteDiscountPctNum: websiteEffectivePct, voiceBasePrice: voiceBasePrice, voiceDiscountApplied: addonVoice && voiceEffectivePct > 0, voiceDiscountAmount: voiceDiscountAmount, voiceDiscountPctNum: voiceEffectivePct, pulseBasePrice: pulseBasePrice, pulseDiscountApplied: addonPulse && pulseEffectivePct > 0, pulseDiscountAmount: pulseDiscountAmount, pulseDiscountPctNum: pulseEffectivePct }),
-        contract_bae_clause_block:           clauseBlocksOvr.bae,
-        contract_website_clause_block:       clauseBlocksOvr.website,
-        contract_ai_terms_block:             buildAiTermsBlock(),
-        contract_early_termination:    buildEarlyTerminationBlock(),
-        contract_manual_email_rate:          manualEmailRateDisplay,
-        contract_manual_sms_rate:       manualSmsRateDisplay,
-        contract_vat_rate_display:      vatRateDisplay,
-        contract_concierge_description: conciergeDescription,
-        subscription_discount_pct:      subEffectivePct,
-        addon_bae_discount_pct:         addonBae     ? baeEffectivePct     : 0,
-        addon_website_discount_pct:     addonWebsite ? websiteEffectivePct : 0,
-        addon_voice_discount_pct:       addonVoice   ? voiceEffectivePct   : 0,
-        addon_pulse_discount_pct:       addonPulse   ? pulseEffectivePct   : 0,
-        contract_pricing_flag:          flagPartsOvr.join(' '),
+        contract_pricing_breakdown_table:      buildBreakdown(Object.assign({}, breakdownOpts, { subscriptionLines: subLinesOvr, totalLabel: 'Total Monthly Subscription', totalAmount: monthlyFinalOvr })),
+        contract_bae_clause_block:             clauseBlocksOvr.bae,
+        contract_website_clause_block:         clauseBlocksOvr.website,
+        contract_ai_terms_block:               buildAiTermsBlock(),
+        contract_early_termination:            buildEarlyTerminationBlock(),
+        contract_manual_email_rate:            manualEmailRateDisplay,
+        contract_manual_sms_rate:              manualSmsRateDisplay,
+        contract_vat_rate_display:             vatRateDisplay,
+        contract_concierge_description:        conciergeDescription,
+        subscription_discount_pct:             subEffectivePct,
+        addon_bae_discount_pct:                addonGrowthOrOperator ? growthOperatorEffectivePct : 0,
+        addon_website_discount_pct:            addonWebsite     ? websiteEffectivePct     : 0,
+        addon_voice_discount_pct:              addonReceptionist ? receptionistEffectivePct : 0,
+        addon_pulse_discount_pct:              addonGrowthOrOperator ? growthOperatorEffectivePct : 0,
+        contract_pricing_flag:                 flagPartsOvr.join(' '),
       };
     } else {
       var tierBaseRaw = cardIncluded === 'No' ? BASE_PRICE_NO_CARD[tier] : BASE_PRICE_CARD_INCLUDED[tier];
@@ -518,7 +533,7 @@ exports.main = async (event, callback) => {
       var subDiscountAmountStd    = Math.round(tierBaseRaw * (subEffectivePct / 100) * 100) / 100;
       var tierAfterSubDiscount    = Math.round((tierBaseRaw - subDiscountAmountStd) * 100) / 100;
 
-      var base                = tierAfterSubDiscount;
+      var base                   = tierAfterSubDiscount;
       var locationDiscountPctStd = 0;
       if (numberOfLocations.indexOf('2') === 0) {
         locationDiscountPctStd = 10;
@@ -542,8 +557,7 @@ exports.main = async (event, callback) => {
       var sentencesStd = [];
       sentencesStd.push('This agreement is for the Barespace ' + tier + ' plan at ' + monthlyFinalDisplayStd + '/month, ' + (cardIncluded === 'Yes' ? 'with card processing included' : 'without card processing') + '.');
       sentencesStd.push(addonsSummary === 'None' ? 'No add-on services are included in this agreement.' : 'This agreement includes the following add-on service(s): ' + addonsSummary + '.');
-      var discountSentsStd = buildDiscountSentences({ tier: tier, bundleQualifies: bundleQualifies, bundleBasePct: bundleBasePct, subEffectivePct: subEffectivePct, subManualPct: subManualPct, locationDiscountPct: locationDiscountPctStd, baeEffectivePct: baeEffectivePct, baeManualPct: baeManualPct, websiteEffectivePct: websiteEffectivePct, websiteManualPct: websiteManualPct, voiceEffectivePct: voiceEffectivePct, voiceManualPct: voiceManualPct, pulseEffectivePct: pulseEffectivePct, pulseManualPct: pulseManualPct });
-      discountSentsStd.forEach(function(s) { sentencesStd.push(s); });
+      buildDiscountSentences(Object.assign({}, discountSentsOpts, { locationDiscountPct: locationDiscountPctStd })).forEach(function(s) { sentencesStd.push(s); });
       sentencesStd.push('Contract term: ' + contractLength + '.');
       if (annualBilledTotalStd !== null) {
         sentencesStd.push('Payment: the full amount of ' + fmt(annualBilledTotalStd) + ' is billed upfront, covering 12 months of service billed at 10 months\u2019 rate.');
@@ -573,21 +587,21 @@ exports.main = async (event, callback) => {
         contract_add_ons_summary:              addonsSummary,
         contract_card_rate_disclosure:         cardRateDisclosure,
         contract_pricing_summary:              sentencesStd.join(' '),
-        contract_pricing_breakdown_table:      buildBreakdown({ subscriptionLines: subLinesStd, addonBaePrice: addonBaePrice, addonWebsitePrice: addonWebsitePrice, addonVoicePrice: addonVoicePrice, addonPulsePrice: addonPulsePrice, baeHasOverride: baeHasOverride, websiteHasOverride: websiteHasOverride, voiceHasOverride: voiceHasOverride, pulseHasOverride: pulseHasOverride, cardRateDisclosure: cardRateDisclosure, cardRateDisclosureText: cardRateDisclosureText, totalLabel: 'Total Monthly Subscription', totalAmount: monthlyFinalStd, baeBasePrice: baeBasePrice, baeDiscountApplied: addonBae && baeEffectivePct > 0, baeDiscountAmount: baeDiscountAmount, baeDiscountPctNum: baeEffectivePct, websiteBasePrice: websiteBasePrice, websiteDiscountApplied: addonWebsite && websiteEffectivePct > 0, websiteDiscountAmount: websiteDiscountAmount, websiteDiscountPctNum: websiteEffectivePct, voiceBasePrice: voiceBasePrice, voiceDiscountApplied: addonVoice && voiceEffectivePct > 0, voiceDiscountAmount: voiceDiscountAmount, voiceDiscountPctNum: voiceEffectivePct, pulseBasePrice: pulseBasePrice, pulseDiscountApplied: addonPulse && pulseEffectivePct > 0, pulseDiscountAmount: pulseDiscountAmount, pulseDiscountPctNum: pulseEffectivePct }),
-        contract_bae_clause_block:           clauseBlocksStd.bae,
-        contract_website_clause_block:       clauseBlocksStd.website,
-        contract_ai_terms_block:             buildAiTermsBlock(),
-        contract_early_termination:    buildEarlyTerminationBlock(),
-        contract_manual_email_rate:          manualEmailRateDisplay,
-        contract_manual_sms_rate:       manualSmsRateDisplay,
-        contract_vat_rate_display:      vatRateDisplay,
-        contract_concierge_description: conciergeDescription,
-        subscription_discount_pct:      subEffectivePct,
-        addon_bae_discount_pct:         addonBae     ? baeEffectivePct     : 0,
-        addon_website_discount_pct:     addonWebsite ? websiteEffectivePct : 0,
-        addon_voice_discount_pct:       addonVoice   ? voiceEffectivePct   : 0,
-        addon_pulse_discount_pct:       addonPulse   ? pulseEffectivePct   : 0,
-        contract_pricing_flag:          flags.join(' ') || '',
+        contract_pricing_breakdown_table:      buildBreakdown(Object.assign({}, breakdownOpts, { subscriptionLines: subLinesStd, totalLabel: 'Total Monthly Subscription', totalAmount: monthlyFinalStd })),
+        contract_bae_clause_block:             clauseBlocksStd.bae,
+        contract_website_clause_block:         clauseBlocksStd.website,
+        contract_ai_terms_block:               buildAiTermsBlock(),
+        contract_early_termination:            buildEarlyTerminationBlock(),
+        contract_manual_email_rate:            manualEmailRateDisplay,
+        contract_manual_sms_rate:              manualSmsRateDisplay,
+        contract_vat_rate_display:             vatRateDisplay,
+        contract_concierge_description:        conciergeDescription,
+        subscription_discount_pct:             subEffectivePct,
+        addon_bae_discount_pct:                addonGrowthOrOperator ? growthOperatorEffectivePct : 0,
+        addon_website_discount_pct:            addonWebsite     ? websiteEffectivePct     : 0,
+        addon_voice_discount_pct:              addonReceptionist ? receptionistEffectivePct : 0,
+        addon_pulse_discount_pct:              addonGrowthOrOperator ? growthOperatorEffectivePct : 0,
+        contract_pricing_flag:                 flags.join(' ') || '',
       };
     }
   }
